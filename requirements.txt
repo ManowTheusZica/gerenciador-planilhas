@@ -7,3 +7,4 @@ numpy>=1.24
 supabase>=2.0
 gunicorn>=20.0
 python-dotenv>=1.0
+serverless-wsgi>=3.0

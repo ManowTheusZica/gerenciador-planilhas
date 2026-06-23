@@ -3,24 +3,6 @@
   functions = "netlify/functions"
   publish = "."
 
-# Arquivos estáticos (CSS, JS, imagens) → servidos diretamente pelo CDN
-[[redirects]]
-  from = "/static/*"
-  to = "/static/"
-  status = 200
-
-# API → encaminha para a Netlify Function
-[[redirects]]
-  from = "/api/*"
-  to = "/.netlify/functions/api"
-  status = 200
-
-# Todas as demais rotas (incluindo /) → Flask via Function
-[[redirects]]
-  from = "/*"
-  to = "/.netlify/functions/api"
-  status = 200
-
 # Arquivos incluídos na função (app + dependências)
 [functions]
   included_files = ["app.py", "supabase_client.py", "templates/**", "static/**"]

@@ -8,8 +8,29 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <style>
+        .config-warning {
+            background: linear-gradient(135deg, #f59e0b, #d97706);
+            color: #1a1a2e;
+            padding: 12px 24px;
+            text-align: center;
+            font-size: 0.9rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+        .config-warning i { font-size: 1.1rem; }
+    </style>
 </head>
 <body>
+    {% if supabase_erro %}
+    <div class="config-warning">
+        <i class="fas fa-exclamation-triangle"></i>
+        {{ supabase_erro }}
+    </div>
+    {% endif %}
     <div class="app-layout">
         <!-- ========== SIDEBAR ========== -->
         <aside class="sidebar" id="sidebar">

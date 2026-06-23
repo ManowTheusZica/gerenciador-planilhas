@@ -1,0 +1,6 @@
+# Netlify _redirects - processado antes do netlify.toml
+# Encaminha tudo para a Function, exceto arquivos estáticos
+
+/static/*        /static/:splat     200
+/api/*           /.netlify/functions/api  200
+/*               /.netlify/functions/api  200

@@ -182,9 +182,29 @@ def _df_para_lista(df):
 # BACKEND UNIFICADO (Local ou Supabase)
 # =============================================================================
 
+SUPABASE_ERRO = None  # Guarda mensagem de erro do Supabase, se houver
+
+def _supabase_disponivel():
+    """Verifica se o Supabase está configurado e acessível."""
+    global SUPABASE_ERRO
+    if not IS_NETLIFY or not storage_backend:
+        return False
+    try:
+        if not os.getenv("SUPABASE_URL") or not os.getenv("SUPABASE_SERVICE_KEY"):
+            SUPABASE_ERRO = "Supabase não configurado. Defina SUPABASE_URL e SUPABASE_SERVICE_KEY nas variáveis de ambiente."
+            return False
+        return True
+    except Exception as e:
+        SUPABASE_ERRO = str(e)
+        return False
+
 def _get_planilhas():
-    if IS_NETLIFY and storage_backend:
-        return storage_backend.listar_planilhas()
+    if _supabase_disponivel():
+        try:
+            return storage_backend.listar_planilhas()
+        except Exception as e:
+            logger.error(f"Supabase list error: {e}")
+            return []
     metadados = _carregar_metadados()
     resultado = []
     for pid, meta in metadados.items():
@@ -204,22 +224,34 @@ def _get_planilhas():
     return resultado
 
 def _get_planilha(pid):
-    if IS_NETLIFY and storage_backend:
-        return storage_backend.obter_planilha(pid)
+    if _supabase_disponivel():
+        try:
+            return storage_backend.obter_planilha(pid)
+        except Exception as e:
+            logger.error(f"Supabase get error: {e}")
+            return None
     metadados = _carregar_metadados()
     return metadados.get(pid)
 
 def _update_planilha(pid, data):
-    if IS_NETLIFY and storage_backend:
-        return storage_backend.atualizar_planilha(pid, data)
+    if _supabase_disponivel():
+        try:
+            return storage_backend.atualizar_planilha(pid, data)
+        except Exception as e:
+            logger.error(f"Supabase update error: {e}")
+            return None
     metadados = _carregar_metadados()
     if pid in metadados:
         metadados[pid].update(data)
         _salvar_metadados(metadados)
 
 def _delete_planilha(pid):
-    if IS_NETLIFY and storage_backend:
-        return storage_backend.deletar_planilha(pid)
+    if _supabase_disponivel():
+        try:
+            return storage_backend.deletar_planilha(pid)
+        except Exception as e:
+            logger.error(f"Supabase delete error: {e}")
+            return False
     metadados = _carregar_metadados()
     meta = metadados.pop(pid, None)
     if meta:
@@ -246,6 +278,7 @@ def index():
         title="Gerenciador de Planilhas",
         total_planilhas=len(planilhas),
         total_tags=len(total_tags),
+        supabase_erro=SUPABASE_ERRO,
     )
 
 
@@ -284,7 +317,7 @@ def api_upload():
         filename = secure_filename(file.filename)
         dados_bytes = file.read()
 
-        if IS_NETLIFY and storage_backend:
+        if _supabase_disponivel():
             try:
                 storage_path = storage_backend.upload_arquivo(filename, dados_bytes)
                 abas, _ = storage_backend.extrair_info_planilha(dados_bytes, filename)
@@ -330,8 +363,8 @@ def api_upload():
 
 @app.route("/api/planilhas/<planilha_id>/delete", methods=["DELETE"])
 def api_deletar(planilha_id):
-    if IS_NETLIFY and storage_backend:
-        ok = storage_backend.deletar_planilha(planilha_id)
+    if _supabase_disponivel():
+        ok = _delete_planilha(planilha_id)
         if not ok:
             return jsonify({"erro": "Planilha não encontrada"}), 404
     else:
@@ -355,7 +388,7 @@ def api_download(planilha_id):
     if not meta:
         abort(404)
 
-    if IS_NETLIFY and storage_backend:
+    if _supabase_disponivel():
         storage_path = meta.get("storage_path", "")
         if not storage_path:
             abort(404)
@@ -383,7 +416,7 @@ def api_preview(planilha_id):
     ext = Path(meta["nome"]).suffix.lower()
 
     try:
-        if IS_NETLIFY and storage_backend:
+        if _supabase_disponivel():
             storage_path = meta.get("storage_path", "")
             if not storage_path:
                 return jsonify({"erro": "Arquivo não encontrado"}), 404
@@ -419,7 +452,7 @@ def api_preview(planilha_id):
 
 @app.route("/api/tags")
 def api_listar_tags():
-    if IS_NETLIFY and storage_backend:
+    if _supabase_disponivel():
         return jsonify(storage_backend.listar_tags_categorias())
     metadados = _carregar_metadados()
     todas_tags = set()
@@ -531,7 +564,7 @@ def api_buscar():
 
 @app.route("/api/scan")
 def api_scan():
-    if IS_NETLIFY:
+    if _supabase_disponivel():
         return jsonify({"adicionados": 0, "total": len(_get_planilhas())})
     metadados = _carregar_metadados()
     adicionados = 0
