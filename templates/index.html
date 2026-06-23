@@ -1,0 +1,920 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ title }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+</head>
+<body>
+    <div class="app-layout">
+        <!-- ========== SIDEBAR ========== -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <span class="logo-icon">📊</span>
+                    <div class="logo-text">
+                        <h1>Planilhas</h1>
+                        <span class="logo-subtitle">Gerenciador</span>
+                    </div>
+                </div>
+            </div>
+
+            <nav class="sidebar-nav">
+                <a href="#" class="nav-item active" onclick="mostrarSecao('todas')">
+                    <i class="fas fa-th-large"></i>
+                    <span>Todas as Planilhas</span>
+                    <span class="nav-badge" id="totalBadge">0</span>
+                </a>
+                <a href="#" class="nav-item" onclick="mostrarSecao('favoritos')">
+                    <i class="fas fa-star"></i>
+                    <span>Favoritas</span>
+                    <span class="nav-badge" id="favoritosBadge">0</span>
+                </a>
+                <a href="#" class="nav-item" onclick="mostrarSecao('recentes')">
+                    <i class="fas fa-clock"></i>
+                    <span>Recentes</span>
+                    <span class="nav-badge" id="recentesBadge">0</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-section">
+                <div class="sidebar-section-title">
+                    <i class="fas fa-tags"></i>
+                    <span>Categorias</span>
+                </div>
+                <div class="sidebar-categorias" id="sidebarCategorias">
+                    <!-- Preenchido via JS -->
+                </div>
+            </div>
+
+            <div class="sidebar-footer">
+                <div class="storage-info" id="storageInfo">
+                    <div class="storage-bar">
+                        <div class="storage-bar-fill" id="storageBarFill"></div>
+                    </div>
+                    <span class="storage-text">Calculando...</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- ========== MAIN ========== -->
+        <main class="main-content">
+            <!-- Header -->
+            <header class="main-header">
+                <button class="menu-toggle" onclick="toggleSidebar()">
+                    <i class="fas fa-bars"></i>
+                </button>
+                <div class="search-bar">
+                    <i class="fas fa-search"></i>
+                    <input
+                        type="text"
+                        id="searchInput"
+                        placeholder="Buscar planilhas por nome, tag ou conteúdo..."
+                        oninput="buscarPlanilhas()"
+                    >
+                    <button class="search-clear" onclick="limparBusca()" id="clearSearch" style="display:none">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+                <div class="header-actions">
+                    <button class="btn btn-scan" onclick="escanearPastas()" title="Escanear pasta de uploads">
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
+                    <button class="btn btn-primary" onclick="abrirUpload()">
+                        <i class="fas fa-upload"></i>
+                        <span>Upload</span>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Content -->
+            <div class="content">
+                <!-- Stats Cards -->
+                <div class="stats-grid" id="statsGrid">
+                    <div class="stat-card">
+                        <div class="stat-icon blue">
+                            <i class="fas fa-file-excel"></i>
+                        </div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="statTotal">0</span>
+                            <span class="stat-label">Planilhas</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon green">
+                            <i class="fas fa-star"></i>
+                        </div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="statFavoritos">0</span>
+                            <span class="stat-label">Favoritas</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon purple">
+                            <i class="fas fa-tags"></i>
+                        </div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="statCategorias">0</span>
+                            <span class="stat-label">Categorias</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon orange">
+                            <i class="fas fa-database"></i>
+                        </div>
+                        <div class="stat-info">
+                            <span class="stat-value" id="statTamanho">0</span>
+                            <span class="stat-label">Armazenamento</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Filtros -->
+                <div class="filtros-bar" id="filtrosBar">
+                    <div class="filtro-tags" id="filtroTags">
+                        <button class="tag-filter active" data-tag="" onclick="filtrarPorTag('')">
+                            Todas
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Grid de Planilhas -->
+                <div class="planilhas-grid" id="planilhasGrid">
+                    <div class="loading-state">
+                        <div class="spinner"></div>
+                        <p>Carregando planilhas...</p>
+                    </div>
+                </div>
+
+                <!-- Empty State -->
+                <div class="empty-state" id="emptyState" style="display:none">
+                    <div class="empty-icon">📂</div>
+                    <h2>Nenhuma planilha encontrada</h2>
+                    <p>Faça upload das suas planilhas para começar a organizá-las.</p>
+                    <button class="btn btn-primary btn-lg" onclick="abrirUpload()">
+                        <i class="fas fa-upload"></i>
+                        Fazer Upload
+                    </button>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- ========== MODAL UPLOAD ========== -->
+    <div class="modal-overlay" id="modalUpload" style="display:none">
+        <div class="modal">
+            <div class="modal-header">
+                <h2><i class="fas fa-upload"></i> Upload de Planilhas</h2>
+                <button class="modal-close" onclick="fecharUpload()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="upload-zone" id="uploadZone"
+                    ondragover="event.preventDefault(); this.classList.add('dragover')"
+                    ondragleave="this.classList.remove('dragover')"
+                    ondrop="event.preventDefault(); this.classList.remove('dragover'); handleDrop(event)">
+                    <i class="fas fa-cloud-upload-alt upload-icon"></i>
+                    <h3>Arraste arquivos aqui</h3>
+                    <p>ou clique para selecionar</p>
+                    <input
+                        type="file"
+                        id="fileInput"
+                        multiple
+                        accept=".xls,.xlsx,.xlsm,.csv,.ods"
+                        onchange="handleFiles(this.files)"
+                        style="display:none"
+                    >
+                    <button class="btn btn-outline" onclick="document.getElementById('fileInput').click()">
+                        Selecionar Arquivos
+                    </button>
+                </div>
+                <div class="upload-preview" id="uploadPreview" style="display:none">
+                    <h4>Arquivos selecionados:</h4>
+                    <ul id="uploadFileList"></ul>
+                    <div class="upload-actions">
+                        <button class="btn btn-secondary" onclick="limparUpload()">Cancelar</button>
+                        <button class="btn btn-primary" onclick="enviarUpload()" id="btnEnviarUpload">
+                            <i class="fas fa-cloud-upload-alt"></i> Enviar
+                        </button>
+                    </div>
+                </div>
+                <div class="upload-progress" id="uploadProgress" style="display:none">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <p id="progressText">Enviando...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== MODAL DETALHES ========== -->
+    <div class="modal-overlay" id="modalDetalhes" style="display:none">
+        <div class="modal modal-lg">
+            <div class="modal-header">
+                <h2><i class="fas fa-file-excel"></i> <span id="detalhesNome"></span></h2>
+                <button class="modal-close" onclick="fecharDetalhes()">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="detalhes-toolbar">
+                    <div class="detalhes-info" id="detalhesInfo">
+                        <span id="detalhesTamanho"></span>
+                        <span id="detalhesData"></span>
+                        <span id="detalhesAbas"></span>
+                    </div>
+                    <div class="detalhes-actions">
+                        <button class="btn btn-sm btn-outline" onclick="toggleFavorito()" id="btnFavorito">
+                            <i class="fas fa-star"></i> Favorito
+                        </button>
+                        <button class="btn btn-sm btn-outline" onclick="downloadPlanilha()">
+                            <i class="fas fa-download"></i> Download
+                        </button>
+                        <button class="btn btn-sm btn-danger" onclick="deletarPlanilha()">
+                            <i class="fas fa-trash"></i> Excluir
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Metadados (Tags, Categoria, Descrição) -->
+                <div class="detalhes-metadata">
+                    <div class="metadata-row">
+                        <div class="metadata-field">
+                            <label><i class="fas fa-tags"></i> Tags</label>
+                            <div class="tags-editor" id="tagsEditor">
+                                <div class="tags-list" id="tagsList"></div>
+                                <input
+                                    type="text"
+                                    id="tagInput"
+                                    placeholder="Adicionar tag..."
+                                    onkeydown="if(event.key==='Enter'){adicionarTag();event.preventDefault()}"
+                                >
+                            </div>
+                        </div>
+                        <div class="metadata-field">
+                            <label><i class="fas fa-folder"></i> Categoria</label>
+                            <select id="categoriaSelect" onchange="salvarMetadados()">
+                                <option value="">Sem categoria</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="metadata-field">
+                        <label><i class="fas fa-align-left"></i> Descrição</label>
+                        <textarea
+                            id="descricaoInput"
+                            rows="2"
+                            placeholder="Adicione uma descrição..."
+                            onchange="salvarMetadados()"
+                        ></textarea>
+                    </div>
+                </div>
+
+                <!-- Preview da planilha -->
+                <div class="detalhes-preview">
+                    <div class="preview-tabs" id="previewTabs">
+                        <!-- Abas serão inseridas aqui -->
+                    </div>
+                    <div class="preview-content" id="previewContent">
+                        <div class="loading-state">
+                            <div class="spinner"></div>
+                            <p>Carregando dados...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========== TOAST NOTIFICATION ========== -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script>
+        // ===================================================================
+        // VARIÁVEIS GLOBAIS
+        // ===================================================================
+        let todasPlanilhas = [];
+        let planilhaAtualId = null;
+        let secaoAtual = 'todas';
+        let tagAtual = '';
+        let searchDebounce = null;
+
+        // ===================================================================
+        // INICIALIZAÇÃO
+        // ===================================================================
+        document.addEventListener('DOMContentLoaded', () => {
+            carregarPlanilhas();
+            carregarStats();
+            carregarTags();
+        });
+
+        // ===================================================================
+        // NOTIFICAÇÕES (TOAST)
+        // ===================================================================
+        function mostrarToast(mensagem, tipo = 'success') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${tipo}`;
+            toast.innerHTML = `
+                <i class="fas fa-${tipo === 'success' ? 'check-circle' : tipo === 'error' ? 'exclamation-circle' : 'info-circle'}"></i>
+                <span>${mensagem}</span>
+            `;
+            container.appendChild(toast);
+            setTimeout(() => {
+                toast.style.animation = 'slideOut 0.3s ease';
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // ===================================================================
+        // SIDEBAR
+        // ===================================================================
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('collapsed');
+        }
+
+        function mostrarSecao(secao) {
+            secaoAtual = secao;
+            document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+            document.querySelector(`.nav-item[onclick*="'${secao}'"]`)?.classList.add('active');
+            renderizarPlanilhas();
+        }
+
+        // ===================================================================
+        // CARREGAR DADOS
+        // ===================================================================
+        async function carregarPlanilhas() {
+            try {
+                const res = await fetch('/api/planilhas');
+                todasPlanilhas = await res.json();
+                renderizarPlanilhas();
+                atualizarBadges();
+            } catch (err) {
+                console.error('Erro ao carregar planilhas:', err);
+                mostrarToast('Erro ao carregar planilhas', 'error');
+            }
+        }
+
+        async function carregarStats() {
+            try {
+                const res = await fetch('/api/stats');
+                const stats = await res.json();
+                document.getElementById('statTotal').textContent = stats.total_planilhas;
+                document.getElementById('statFavoritos').textContent = stats.favoritos;
+                document.getElementById('statCategorias').textContent = Object.keys(stats.categorias).length;
+                document.getElementById('statTamanho').textContent = stats.total_tamanho_formatado;
+
+                // Storage bar
+                const tamanhoMB = stats.total_tamanho / (1024 * 1024);
+                const pct = Math.min((tamanhoMB / 500) * 100, 100);
+                document.getElementById('storageBarFill').style.width = pct + '%';
+                document.getElementById('storageInfo').querySelector('.storage-text').textContent =
+                    `${stats.total_tamanho_formatado} usado`;
+            } catch (err) {
+                console.error('Erro ao carregar stats:', err);
+            }
+        }
+
+        async function carregarTags() {
+            try {
+                const res = await fetch('/api/tags');
+                const data = await res.json();
+
+                // Filtro tags
+                const container = document.getElementById('filtroTags');
+                data.tags.forEach(tag => {
+                    const btn = document.createElement('button');
+                    btn.className = 'tag-filter';
+                    btn.dataset.tag = tag;
+                    btn.textContent = tag;
+                    btn.onclick = () => filtrarPorTag(tag);
+                    container.appendChild(btn);
+                });
+
+                // Sidebar categorias
+                const sidebarCat = document.getElementById('sidebarCategorias');
+                data.categorias.forEach(cat => {
+                    const a = document.createElement('a');
+                    a.href = '#';
+                    a.className = 'categoria-item';
+                    a.innerHTML = `<i class="fas fa-folder"></i><span>${cat}</span>`;
+                    a.onclick = (e) => {
+                        e.preventDefault();
+                        document.getElementById('searchInput').value = `categoria:${cat}`;
+                        buscarPlanilhas();
+                    };
+                    sidebarCat.appendChild(a);
+                });
+
+                // Select categorias no modal
+                const select = document.getElementById('categoriaSelect');
+                data.categorias.forEach(cat => {
+                    const opt = document.createElement('option');
+                    opt.value = cat;
+                    opt.textContent = cat;
+                    select.appendChild(opt);
+                });
+            } catch (err) {
+                console.error('Erro ao carregar tags:', err);
+            }
+        }
+
+        function atualizarBadges() {
+            const total = todasPlanilhas.length;
+            const favoritos = todasPlanilhas.filter(p => p.favorito).length;
+            document.getElementById('totalBadge').textContent = total;
+            document.getElementById('favoritosBadge').textContent = favoritos;
+            document.getElementById('recentesBadge').textContent = Math.min(total, 99);
+        }
+
+        // ===================================================================
+        // RENDERIZAR PLANILHAS
+        // ===================================================================
+        function renderizarPlanilhas() {
+            const grid = document.getElementById('planilhasGrid');
+            const empty = document.getElementById('emptyState');
+            const searchTerm = document.getElementById('searchInput').value.trim().toLowerCase();
+
+            let filtradas = [...todasPlanilhas];
+
+            // Filtro por seção
+            if (secaoAtual === 'favoritos') {
+                filtradas = filtradas.filter(p => p.favorito);
+            } else if (secaoAtual === 'recentes') {
+                const seteDias = new Date();
+                seteDias.setDate(seteDias.getDate() - 7);
+                filtradas = filtradas.filter(p => {
+                    if (!p.ultima_modificacao) return false;
+                    const data = new Date(p.ultima_modificacao);
+                    return data >= seteDias;
+                });
+            }
+
+            // Filtro por tag
+            if (tagAtual) {
+                filtradas = filtradas.filter(p => p.tags.includes(tagAtual));
+            }
+
+            // Filtro por busca
+            if (searchTerm) {
+                if (searchTerm.startsWith('categoria:')) {
+                    const cat = searchTerm.replace('categoria:', '');
+                    filtradas = filtradas.filter(p => p.categoria.toLowerCase() === cat);
+                } else {
+                    filtradas = filtradas.filter(p =>
+                        p.nome.toLowerCase().includes(searchTerm) ||
+                        p.tags.some(t => t.toLowerCase().includes(searchTerm)) ||
+                        p.categoria.toLowerCase().includes(searchTerm) ||
+                        p.descricao.toLowerCase().includes(searchTerm)
+                    );
+                }
+            }
+
+            if (filtradas.length === 0) {
+                grid.style.display = 'none';
+                empty.style.display = 'flex';
+                return;
+            }
+
+            grid.style.display = 'grid';
+            empty.style.display = 'none';
+
+            grid.innerHTML = filtradas.map(p => `
+                <div class="planilha-card ${p.favorito ? 'favorito' : ''}" onclick="abrirDetalhes('${p.id}')">
+                    <div class="card-icon">
+                        <i class="fas fa-file-excel"></i>
+                    </div>
+                    <div class="card-info">
+                        <h3 class="card-title" title="${p.nome}">${p.nome}</h3>
+                        <div class="card-meta">
+                            <span>${p.tamanho_formatado}</span>
+                            ${p.data_upload ? `<span>${formatarData(p.ultima_modificacao)}</span>` : ''}
+                        </div>
+                        ${p.abas && p.abas.length > 0 ? `
+                            <div class="card-abas">
+                                ${p.abas.slice(0, 3).map(a => `<span class="aba-tag">${a.nome}</span>`).join('')}
+                                ${p.abas.length > 3 ? `<span class="aba-tag">+${p.abas.length - 3}</span>` : ''}
+                            </div>
+                        ` : ''}
+                        ${p.tags && p.tags.length > 0 ? `
+                            <div class="card-tags">
+                                ${p.tags.map(t => `<span class="mini-tag">${t}</span>`).join('')}
+                            </div>
+                        ` : ''}
+                    </div>
+                    <div class="card-status">
+                        ${p.favorito ? '<i class="fas fa-star star-active"></i>' : ''}
+                        ${!p.existe ? '<span class="status-flag missing">Ausente</span>' : ''}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function formatarData(iso) {
+            if (!iso) return '';
+            const d = new Date(iso);
+            return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        }
+
+        // ===================================================================
+        // BUSCA
+        // ===================================================================
+        function buscarPlanilhas() {
+            clearTimeout(searchDebounce);
+            searchDebounce = setTimeout(() => {
+                const input = document.getElementById('searchInput');
+                document.getElementById('clearSearch').style.display = input.value ? 'block' : 'none';
+                renderizarPlanilhas();
+            }, 300);
+        }
+
+        function limparBusca() {
+            document.getElementById('searchInput').value = '';
+            document.getElementById('clearSearch').style.display = 'none';
+            renderizarPlanilhas();
+        }
+
+        function filtrarPorTag(tag) {
+            tagAtual = tag;
+            document.querySelectorAll('.tag-filter').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.tag === tag);
+            });
+            renderizarPlanilhas();
+        }
+
+        // ===================================================================
+        // UPLOAD
+        // ===================================================================
+        let arquivosUpload = [];
+
+        function abrirUpload() {
+            document.getElementById('modalUpload').style.display = 'flex';
+        }
+
+        function fecharUpload() {
+            document.getElementById('modalUpload').style.display = 'none';
+            limparUpload();
+        }
+
+        function handleDrop(event) {
+            handleFiles(event.dataTransfer.files);
+        }
+
+        function handleFiles(files) {
+            arquivosUpload = Array.from(files).filter(f => {
+                const ext = f.name.split('.').pop().toLowerCase();
+                return ['xls', 'xlsx', 'xlsm', 'csv', 'ods'].includes(ext);
+            });
+
+            if (arquivosUpload.length === 0) {
+                mostrarToast('Tipo de arquivo não suportado', 'error');
+                return;
+            }
+
+            document.getElementById('uploadPreview').style.display = 'block';
+            document.querySelector('.upload-zone').style.display = 'none';
+
+            const list = document.getElementById('uploadFileList');
+            list.innerHTML = arquivosUpload.map(f =>
+                `<li><i class="fas fa-file-excel"></i> ${f.name} (${(f.size / 1024 / 1024).toFixed(1)} MB)</li>`
+            ).join('');
+        }
+
+        function limparUpload() {
+            arquivosUpload = [];
+            document.getElementById('uploadPreview').style.display = 'none';
+            document.querySelector('.upload-zone').style.display = 'block';
+            document.getElementById('fileInput').value = '';
+            document.getElementById('uploadProgress').style.display = 'none';
+            document.getElementById('btnEnviarUpload').disabled = false;
+        }
+
+        async function enviarUpload() {
+            if (arquivosUpload.length === 0) return;
+
+            const btn = document.getElementById('btnEnviarUpload');
+            btn.disabled = true;
+
+            document.getElementById('uploadProgress').style.display = 'block';
+
+            const formData = new FormData();
+            arquivosUpload.forEach(f => formData.append('files', f));
+
+            try {
+                const res = await fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData,
+                });
+                const data = await res.json();
+
+                if (res.ok) {
+                    mostrarToast(`${data.total} planilha(s) enviada(s) com sucesso!`, 'success');
+                    fecharUpload();
+                    carregarPlanilhas();
+                    carregarStats();
+                    carregarTags();
+                } else {
+                    mostrarToast(data.erro || 'Erro no upload', 'error');
+                }
+            } catch (err) {
+                mostrarToast('Erro de conexão', 'error');
+            } finally {
+                btn.disabled = false;
+                document.getElementById('uploadProgress').style.display = 'none';
+            }
+        }
+
+        // ===================================================================
+        // DETALHES
+        // ===================================================================
+        async function abrirDetalhes(id) {
+            planilhaAtualId = id;
+            document.getElementById('modalDetalhes').style.display = 'flex';
+
+            try {
+                const res = await fetch(`/api/planilhas/${id}`);
+                const planilha = await res.json();
+                document.getElementById('detalhesNome').textContent = planilha.nome;
+                document.getElementById('detalhesTamanho').innerHTML =
+                    `<i class="fas fa-weight-hanging"></i> ${planilha.tamanho_formatado}`;
+                document.getElementById('detalhesData').innerHTML =
+                    `<i class="fas fa-calendar"></i> ${formatarData(planilha.ultima_modificacao)}`;
+                document.getElementById('detalhesAbas').innerHTML =
+                    `<i class="fas fa-sheet-plastic"></i> ${planilha.abas?.length || 0} aba(s)`;
+
+                // Favorito
+                const btnFav = document.getElementById('btnFavorito');
+                btnFav.innerHTML = planilha.favorito
+                    ? '<i class="fas fa-star" style="color: #f1c40f"></i> Favorito'
+                    : '<i class="far fa-star"></i> Favorito';
+
+                // Tags
+                renderizarTags(planilha.tags || []);
+
+                // Categoria
+                document.getElementById('categoriaSelect').value = planilha.categoria || '';
+
+                // Descrição
+                document.getElementById('descricaoInput').value = planilha.descricao || '';
+
+                // Preview
+                carregarPreview(id);
+
+            } catch (err) {
+                console.error(err);
+                mostrarToast('Erro ao carregar detalhes', 'error');
+            }
+        }
+
+        function fecharDetalhes() {
+            document.getElementById('modalDetalhes').style.display = 'none';
+            planilhaAtualId = null;
+        }
+
+        // ===================================================================
+        // TAGS
+        // ===================================================================
+        function renderizarTags(tags) {
+            const list = document.getElementById('tagsList');
+            list.innerHTML = tags.map(t => `
+                <span class="tag-item">
+                    ${t}
+                    <i class="fas fa-times tag-remove" onclick="removerTag('${t}')"></i>
+                </span>
+            `).join('');
+        }
+
+        async function adicionarTag() {
+            const input = document.getElementById('tagInput');
+            const tag = input.value.trim();
+            if (!tag) return;
+
+            const list = document.getElementById('tagsList');
+            const existing = list.querySelectorAll('.tag-item');
+            for (const el of existing) {
+                if (el.textContent.trim().startsWith(tag)) return;
+            }
+
+            input.value = '';
+            const tags = Array.from(list.querySelectorAll('.tag-item')).map(el => el.textContent.trim());
+            tags.push(tag);
+            renderizarTags(tags);
+            await salvarMetadados();
+        }
+
+        async function removerTag(tag) {
+            const list = document.getElementById('tagsList');
+            const tags = Array.from(list.querySelectorAll('.tag-item'))
+                .map(el => el.textContent.trim())
+                .filter(t => t !== tag);
+            renderizarTags(tags);
+            await salvarMetadados();
+        }
+
+        async function salvarMetadados() {
+            if (!planilhaAtualId) return;
+
+            const list = document.getElementById('tagsList');
+            const tags = Array.from(list.querySelectorAll('.tag-item')).map(el => el.textContent.trim());
+            const categoria = document.getElementById('categoriaSelect').value;
+            const descricao = document.getElementById('descricaoInput').value;
+
+            try {
+                const res = await fetch(`/api/planilhas/${planilhaAtualId}/update`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tags, categoria, descricao }),
+                });
+                if (res.ok) {
+                    carregarPlanilhas();
+                    carregarTags();
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function toggleFavorito() {
+            if (!planilhaAtualId) return;
+            const planilha = todasPlanilhas.find(p => p.id === planilhaAtualId);
+            if (!planilha) return;
+
+            const novoFavorito = !planilha.favorito;
+            try {
+                const res = await fetch(`/api/planilhas/${planilhaAtualId}/update`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ favorito: novoFavorito }),
+                });
+                if (res.ok) {
+                    planilha.favorito = novoFavorito;
+                    const btnFav = document.getElementById('btnFavorito');
+                    btnFav.innerHTML = novoFavorito
+                        ? '<i class="fas fa-star" style="color: #f1c40f"></i> Favorito'
+                        : '<i class="far fa-star"></i> Favorito';
+                    carregarPlanilhas();
+                    carregarStats();
+                    mostrarToast(
+                        novoFavorito ? 'Adicionada aos favoritos' : 'Removida dos favoritos',
+                        'success'
+                    );
+                }
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        async function downloadPlanilha() {
+            if (!planilhaAtualId) return;
+            window.open(`/api/planilhas/${planilhaAtualId}/download`, '_blank');
+            mostrarToast('Download iniciado', 'success');
+        }
+
+        async function deletarPlanilha() {
+            if (!planilhaAtualId) return;
+            if (!confirm('Tem certeza que deseja excluir esta planilha?')) return;
+
+            try {
+                const res = await fetch(`/api/planilhas/${planilhaAtualId}/delete`, {
+                    method: 'DELETE',
+                });
+                if (res.ok) {
+                    mostrarToast('Planilha excluída', 'success');
+                    fecharDetalhes();
+                    carregarPlanilhas();
+                    carregarStats();
+                    carregarTags();
+                }
+            } catch (err) {
+                mostrarToast('Erro ao excluir', 'error');
+            }
+        }
+
+        // ===================================================================
+        // PREVIEW
+        // ===================================================================
+        async function carregarPreview(id) {
+            const tabs = document.getElementById('previewTabs');
+            const content = document.getElementById('previewContent');
+            tabs.innerHTML = '';
+            content.innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Carregando dados...</p></div>';
+
+            try {
+                const res = await fetch(`/api/planilhas/${id}/preview?limite=100`);
+                const data = await res.json();
+
+                if (data.erro) {
+                    content.innerHTML = `<div class="preview-error">${data.erro}</div>`;
+                    return;
+                }
+
+                if (!data.abas || data.abas.length === 0) {
+                    content.innerHTML = '<div class="preview-empty">Nenhum dado encontrado</div>';
+                    return;
+                }
+
+                // Tabs
+                tabs.innerHTML = data.abas.map((aba, i) => `
+                    <button class="preview-tab ${i === 0 ? 'active' : ''}"
+                        onclick="mostrarAba(${i})">
+                        ${aba.nome}
+                        <span class="aba-count">${aba.total_linhas} linhas</span>
+                    </button>
+                `).join('');
+
+                // Primeira aba
+                mostrarAba(0, data.abas);
+
+            } catch (err) {
+                content.innerHTML = '<div class="preview-error">Erro ao carregar preview</div>';
+            }
+        }
+
+        function mostrarAba(index, abasData) {
+            const tabs = document.querySelectorAll('.preview-tab');
+            tabs.forEach((t, i) => t.classList.toggle('active', i === index));
+
+            const content = document.getElementById('previewContent');
+
+            // Se abasData não foi passado, precisamos buscar de novo ou usar dados em cache
+            if (!abasData) {
+                carregarPreview(planilhaAtualId);
+                return;
+            }
+
+            const aba = abasData[index];
+            if (!aba) return;
+
+            if (!aba.colunas || aba.colunas.length === 0) {
+                content.innerHTML = '<div class="preview-empty">Nenhuma coluna encontrada</div>';
+                return;
+            }
+
+            let html = '<div class="table-wrapper"><table class="preview-table">';
+
+            // Header
+            html += '<thead><tr>';
+            html += aba.colunas.map(c => `<th>${c}</th>`).join('');
+            html += '</tr></thead>';
+
+            // Body
+            html += '<tbody>';
+            if (aba.linhas && aba.linhas.length > 0) {
+                aba.linhas.forEach(row => {
+                    html += '<tr>';
+                    html += aba.colunas.map((_, i) => {
+                        const val = row[i];
+                        const display = val === null || val === undefined ? '' : String(val);
+                        return `<td title="${display}">${display}</td>`;
+                    }).join('');
+                    html += '</tr>';
+                });
+            } else {
+                html += '<tr><td colspan="999" class="empty-cell">Nenhum dado</td></tr>';
+            }
+            html += '</tbody></table></div>';
+
+            // Info
+            html += `<div class="preview-info">Mostrando ${aba.linhas.length} de ${aba.total_linhas} linhas</div>`;
+
+            content.innerHTML = html;
+        }
+
+        // ===================================================================
+        // ESCANEAMENTO
+        // ===================================================================
+        async function escanearPastas() {
+            try {
+                const res = await fetch('/api/scan');
+                const data = await res.json();
+                if (data.adicionados > 0) {
+                    mostrarToast(`${data.adicionados} nova(s) planilha(s) encontrada(s)!`, 'success');
+                    carregarPlanilhas();
+                    carregarStats();
+                } else {
+                    mostrarToast('Nenhuma planilha nova encontrada', 'info');
+                }
+            } catch (err) {
+                mostrarToast('Erro ao escanear', 'error');
+            }
+        }
+
+        // ===================================================================
+        // FECHAR MODAIS AO CLICAR FORA
+        // ===================================================================
+        document.querySelectorAll('.modal-overlay').forEach(overlay => {
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) {
+                    overlay.style.display = 'none';
+                    if (overlay.id === 'modalDetalhes') planilhaAtualId = null;
+                }
+            });
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,44 @@
+[build]
+  command = "pip install -r requirements.txt"
+  functions = "netlify/functions"
+  publish = "."
+
+# Arquivos estáticos (CSS, JS, imagens) → servidos diretamente pelo CDN
+[[redirects]]
+  from = "/static/*"
+  to = "/static/"
+  status = 200
+
+# API → encaminha para a Netlify Function
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/api"
+  status = 200
+
+# Todas as demais rotas (incluindo /) → Flask via Function
+[[redirects]]
+  from = "/*"
+  to = "/.netlify/functions/api"
+  status = 200
+
+# Configurações da função serverless
+[functions]
+  timeout = 30
+  memory = 1024
+
+# Headers de segurança - nega acesso a arquivos sensíveis
+[[headers]]
+  for = "/*.py"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+    Cache-Control = "private, no-cache"
+
+[[headers]]
+  for = "/*.json"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
+
+[[headers]]
+  for = "/templates/*"
+  [headers.values]
+    X-Robots-Tag = "noindex, nofollow"
