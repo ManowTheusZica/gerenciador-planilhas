@@ -21,10 +21,9 @@
   to = "/.netlify/functions/api"
   status = 200
 
-# Configurações da função serverless
+# Arquivos incluídos na função (app + dependências)
 [functions]
-  timeout = 30
-  memory = 1024
+  included_files = ["app.py", "supabase_client.py", "templates/**", "static/**"]
 
 # Headers de segurança - nega acesso a arquivos sensíveis
 [[headers]]
