@@ -3,11 +3,11 @@
   functions = "netlify/functions"
   publish = "."
 
-# Arquivos incluídos na função (app + dependências)
 [functions]
+  # Inclui arquivos extras necessários para a função Flask
   included_files = ["app.py", "supabase_client.py", "templates/**", "static/**"]
 
-# Headers de segurança - nega acesso a arquivos sensíveis
+# Headers de segurança
 [[headers]]
   for = "/*.py"
   [headers.values]

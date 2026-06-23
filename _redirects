@@ -1,6 +1,13 @@
-# Netlify _redirects - processado antes do netlify.toml
-# Encaminha tudo para a Function, exceto arquivos estáticos
+# Netlify _redirects
 
+# Teste: hello function
+/hello           /.netlify/functions/hello  200
+
+# Arquivos estáticos
 /static/*        /static/:splat     200
+
+# API
 /api/*           /.netlify/functions/api  200
+
+# Tudo o resto vai para o Flask
 /*               /.netlify/functions/api  200
