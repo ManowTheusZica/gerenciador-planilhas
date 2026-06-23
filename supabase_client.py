@@ -11,9 +11,9 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from supabase import create_client, Client
-import pandas as pd
 
 logger = logging.getLogger("supabase")
 
@@ -24,7 +24,7 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_KEY", "")
 BUCKET_NAME = os.getenv("SUPABASE_BUCKET", "planilhas")
 
-_supabase: Client | None = None
+_supabase: Optional[Client] = None
 
 
 def get_client() -> Client:
@@ -38,13 +38,14 @@ def get_client() -> Client:
             )
         _supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
         _inicializar_bucket()
-    return _supabase
+    # _supabase sempre será Client aqui
+    return _supabase  # type: ignore[return-value]
 
 
-def _inicializar_bucket():
+def _inicializar_bucket() -> None:
     """Garante que o bucket de storage existe."""
     try:
-        supabase = _supabase
+        supabase = get_client()
         buckets = supabase.storage.list_buckets()
         nomes = [b.name for b in buckets]
         if BUCKET_NAME not in nomes:
@@ -61,35 +62,52 @@ def _inicializar_bucket():
 # Metadados (PostgreSQL)
 # ---------------------------------------------------------------------------
 
-def listar_planilhas() -> list[dict]:
+def listar_planilhas() -> List[Dict[str, Any]]:
     """Lista todas as planilhas com metadados."""
     supabase = get_client()
     resp = supabase.table("planilhas").select("*").order("favorito", desc=True).order("nome").execute()
-    dados = []
+    dados: List[Dict[str, Any]] = []
     for row in resp.data:
-        row["tags"] = row.get("tags") or []
-        row["abas"] = row.get("abas") or []
-        row["favorito"] = bool(row.get("favorito", False))
-        dados.append(_row_para_dict(row))
+        if not isinstance(row, dict):
+            continue
+        row_dict: Dict[str, Any] = dict(row)
+        row_dict["tags"] = row_dict.get("tags") or []
+        row_dict["abas"] = row_dict.get("abas") or []
+        row_dict["favorito"] = bool(row_dict.get("favorito", False))
+        dados.append(_row_para_dict(row_dict))
     return dados
 
 
-def obter_planilha(planilha_id: str) -> dict | None:
+def obter_planilha(planilha_id: str) -> Optional[Dict[str, Any]]:
     """Obtém uma planilha pelo ID."""
     supabase = get_client()
     resp = supabase.table("planilhas").select("*").eq("id", planilha_id).execute()
     if not resp.data:
         return None
     row = resp.data[0]
-    return _row_para_dict(row)
+    if not isinstance(row, dict):
+        return None
+    return _row_para_dict(dict(row))
+
+
+def obter_planilha_por_nome(nome: str) -> Optional[Dict[str, Any]]:
+    """Busca uma planilha pelo nome exato."""
+    supabase = get_client()
+    resp = supabase.table("planilhas").select("*").eq("nome", nome).execute()
+    if not resp.data:
+        return None
+    row = resp.data[0]
+    if not isinstance(row, dict):
+        return None
+    return _row_para_dict(dict(row))
 
 
 def criar_planilha(nome: str, storage_path: str, tamanho: int,
-                   extensao: str, abas: list) -> dict:
+                   extensao: str, abas: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Cria um novo registro de planilha."""
     supabase = get_client()
     now = datetime.now().isoformat()
-    data = {
+    data: Dict[str, Any] = {
         "nome": nome,
         "storage_path": storage_path,
         "tamanho": tamanho,
@@ -104,13 +122,15 @@ def criar_planilha(nome: str, storage_path: str, tamanho: int,
         "abas": json.dumps(abas, ensure_ascii=False),
     }
     resp = supabase.table("planilhas").insert(data).execute()
-    return _row_para_dict(resp.data[0]) if resp.data else data
+    if resp.data and isinstance(resp.data[0], dict):
+        return _row_para_dict(dict(resp.data[0]))
+    return data
 
 
-def atualizar_planilha(planilha_id: str, dados: dict) -> dict | None:
+def atualizar_planilha(planilha_id: str, dados: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Atualiza metadados de uma planilha."""
     supabase = get_client()
-    update = {k: v for k, v in dados.items() if k in (
+    update: Dict[str, Any] = {k: v for k, v in dados.items() if k in (
         "nome", "descricao", "favorito", "categoria", "tags", "abas"
     )}
     if "tags" in update and isinstance(update["tags"], list):
@@ -119,7 +139,9 @@ def atualizar_planilha(planilha_id: str, dados: dict) -> dict | None:
         update["abas"] = json.dumps(update["abas"])
     update["updated_at"] = datetime.now().isoformat()
     resp = supabase.table("planilhas").update(update).eq("id", planilha_id).execute()
-    return _row_para_dict(resp.data[0]) if resp.data else None
+    if resp.data and isinstance(resp.data[0], dict):
+        return _row_para_dict(dict(resp.data[0]))
+    return None
 
 
 def deletar_planilha(planilha_id: str) -> bool:
@@ -142,7 +164,7 @@ def deletar_planilha(planilha_id: str) -> bool:
     return True
 
 
-def _row_para_dict(row: dict) -> dict:
+def _row_para_dict(row: Dict[str, Any]) -> Dict[str, Any]:
     """Converte row do Supabase para dict padronizado."""
     if isinstance(row.get("tags"), str):
         row["tags"] = json.loads(row["tags"])
@@ -156,20 +178,26 @@ def _row_para_dict(row: dict) -> dict:
 # Tags / Categorias
 # ---------------------------------------------------------------------------
 
-def listar_tags_categorias() -> dict:
+def listar_tags_categorias() -> Dict[str, List[str]]:
     """Lista todas as tags e categorias em uso."""
     supabase = get_client()
     resp = supabase.table("planilhas").select("tags,categoria").execute()
-    todas_tags = set()
-    categorias = set()
+    todas_tags: Set[str] = set()
+    categorias: Set[str] = set()
     for row in resp.data:
-        tags = row.get("tags") or []
-        if isinstance(tags, str):
-            tags = json.loads(tags)
-        for t in tags:
-            todas_tags.add(t)
-        if row.get("categoria"):
-            categorias.add(row["categoria"])
+        if not isinstance(row, dict):
+            continue
+        raw_tags = row.get("tags") or []
+        if isinstance(raw_tags, str):
+            raw_tags = json.loads(raw_tags)
+        if isinstance(raw_tags, list):
+            # Percorre lista de tags (o tipo JSON é complexo, mas só usamos strings)
+            for item in raw_tags:  # type: ignore[union-attr]
+                if isinstance(item, str) and item.strip():
+                    todas_tags.add(item.strip())
+        cat = row.get("categoria")
+        if isinstance(cat, str) and cat:
+            categorias.add(cat)
     return {
         "tags": sorted(t for t in todas_tags if t),
         "categorias": sorted(c for c in categorias if c),
@@ -195,6 +223,17 @@ def upload_arquivo(nome_arquivo: str, dados_bytes: bytes) -> str:
     return storage_path
 
 
+def deletar_arquivo_storage(storage_path: str) -> None:
+    """Remove um arquivo do Supabase Storage (ignora se não existir)."""
+    if not storage_path:
+        return
+    try:
+        supabase = get_client()
+        supabase.storage.from_(BUCKET_NAME).remove([storage_path])
+    except Exception as e:
+        logger.warning(f"Erro ao deletar storage: {e}")
+
+
 def download_arquivo(storage_path: str) -> bytes:
     """Faz download de um arquivo do Supabase Storage."""
     supabase = get_client()
@@ -217,18 +256,17 @@ def _formatar_tamanho(bytes_val: int) -> str:
     for unit in ["B", "KB", "MB", "GB"]:
         if bytes_val < 1024:
             return f"{bytes_val:.1f} {unit}"
-        bytes_val /= 1024
+        bytes_val = int(bytes_val) // 1024
     return f"{bytes_val:.1f} TB"
 
 
-def extrair_info_planilha(arquivo_bytes: bytes, nome: str) -> tuple[list, int]:
+def extrair_info_planilha(arquivo_bytes: bytes, nome: str) -> Tuple[List[Dict[str, Any]], int]:
     """Extrai informações das abas de uma planilha.
     Retorna (abas, tamanho)."""
     import pandas as pd
-    import numpy as np
 
     ext = Path(nome).suffix.lower()
-    abas = []
+    abas: List[Dict[str, Any]] = []
     tamanho = len(arquivo_bytes)
 
     try:

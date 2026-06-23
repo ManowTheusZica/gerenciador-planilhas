@@ -257,6 +257,9 @@
                         <button class="btn btn-sm btn-outline" onclick="downloadPlanilha()">
                             <i class="fas fa-download"></i> Download
                         </button>
+                        <button class="btn btn-sm btn-outline" onclick="substituirPlanilha()" title="Substituir arquivo mantendo metadados">
+                            <i class="fas fa-sync-alt"></i> Substituir
+                        </button>
                         <button class="btn btn-sm btn-danger" onclick="deletarPlanilha()">
                             <i class="fas fa-trash"></i> Excluir
                         </button>
@@ -621,20 +624,47 @@
             const btn = document.getElementById('btnEnviarUpload');
             btn.disabled = true;
 
+            // Verifica se algum arquivo já existe (substituir?)
+            let precisaSubstituir = false;
+            for (const f of arquivosUpload) {
+                const existe = todasPlanilhas.find(p => p.nome === f.name);
+                if (existe) {
+                    precisaSubstituir = true;
+                    break;
+                }
+            }
+            
+            if (precisaSubstituir) {
+                const confirmar = confirm(
+                    'Já existe(m) planilha(s) com o mesmo nome. Deseja substituir?\n' +
+                    'Os dados antigos serão perdidos.'
+                );
+                if (!confirmar) {
+                    btn.disabled = false;
+                    return;
+                }
+            }
+
             document.getElementById('uploadProgress').style.display = 'block';
 
             const formData = new FormData();
             arquivosUpload.forEach(f => formData.append('files', f));
 
             try {
-                const res = await fetch('/api/upload', {
+                const url = precisaSubstituir ? '/api/upload?replace=true' : '/api/upload';
+                const res = await fetch(url, {
                     method: 'POST',
                     body: formData,
                 });
                 const data = await res.json();
 
                 if (res.ok) {
-                    mostrarToast(`${data.total} planilha(s) enviada(s) com sucesso!`, 'success');
+                    const msgSubst = data.resultados?.filter(r => r.substituido).length || 0;
+                    const msgNovos = data.resultados?.filter(r => r.status === 'ok' && !r.substituido).length || 0;
+                    let mensagem = '';
+                    if (msgNovos > 0) mensagem += `${msgNovos} nova(s)`;
+                    if (msgSubst > 0) mensagem += `${msgNovos > 0 ? ', ' : ''}${msgSubst} substituída(s)`;
+                    mostrarToast(`${mensagem || data.total} planilha(s) enviada(s)!`, 'success');
                     fecharUpload();
                     carregarPlanilhas();
                     carregarStats();
@@ -794,6 +824,46 @@
             if (!planilhaAtualId) return;
             window.open(`/api/planilhas/${planilhaAtualId}/download`, '_blank');
             mostrarToast('Download iniciado', 'success');
+        }
+
+        async function substituirPlanilha() {
+            if (!planilhaAtualId) return;
+            
+            const planilha = todasPlanilhas.find(p => p.id === planilhaAtualId);
+            if (!planilha) return;
+            
+            // Cria input de arquivo escondido
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.xls,.xlsx,.xlsm,.csv,.ods';
+            input.onchange = async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                
+                if (!confirm(`Substituir "${planilha.nome}" pelo arquivo "${file.name}"?\nOs dados antigos serão perdidos.`)) return;
+                
+                const formData = new FormData();
+                formData.append('files', file);
+                
+                try {
+                    const res = await fetch(`/api/upload?replace=true`, {
+                        method: 'POST',
+                        body: formData,
+                    });
+                    const data = await res.json();
+                    if (res.ok && data.resultados?.[0]?.status === 'ok') {
+                        mostrarToast('Planilha substituída com sucesso!', 'success');
+                        fecharDetalhes();
+                        carregarPlanilhas();
+                        carregarStats();
+                    } else {
+                        mostrarToast(data.resultados?.[0]?.mensagem || 'Erro ao substituir', 'error');
+                    }
+                } catch (err) {
+                    mostrarToast('Erro de conexão', 'error');
+                }
+            };
+            input.click();
         }
 
         async function deletarPlanilha() {

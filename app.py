@@ -319,14 +319,36 @@ def api_upload():
 
         if _supabase_disponivel():
             try:
-                storage_path = storage_backend.upload_arquivo(filename, dados_bytes)
-                abas, _ = storage_backend.extrair_info_planilha(dados_bytes, filename)
-                meta = storage_backend.criar_planilha(
-                    nome=filename, storage_path=storage_path,
-                    tamanho=len(dados_bytes), extensao=Path(filename).suffix.lower(),
-                    abas=abas,
-                )
-                resultados.append({"id": meta.get("id", ""), "nome": filename, "status": "ok"})
+                # Verifica se já existe planilha com mesmo nome
+                existente = storage_backend.obter_planilha_por_nome(filename)
+                substituir = request.args.get("replace", "").lower() == "true"
+                
+                if existente and (substituir or request.args.get("force") == "true"):
+                    # Substituir arquivo existente
+                    storage_backend.deletar_arquivo_storage(existente.get("storage_path", ""))
+                    storage_path = storage_backend.upload_arquivo(filename, dados_bytes)
+                    abas, _ = storage_backend.extrair_info_planilha(dados_bytes, filename)
+                    storage_backend.atualizar_planilha(existente["id"], {
+                        "storage_path": storage_path,
+                        "tamanho": len(dados_bytes),
+                        "tamanho_formatado": _formatar_tamanho(len(dados_bytes)),
+                        "ultima_modificacao": datetime.now().isoformat(),
+                        "abas": json.dumps(abas, ensure_ascii=False),
+                    })
+                    resultados.append({"id": existente["id"], "nome": filename, "status": "ok", "substituido": True})
+                elif existente and not substituir:
+                    # Nome duplicado, avisa
+                    resultados.append({"id": existente["id"], "nome": filename, "status": "duplicado", "mensagem": "Já existe uma planilha com este nome"})
+                else:
+                    # Novo arquivo
+                    storage_path = storage_backend.upload_arquivo(filename, dados_bytes)
+                    abas, _ = storage_backend.extrair_info_planilha(dados_bytes, filename)
+                    meta = storage_backend.criar_planilha(
+                        nome=filename, storage_path=storage_path,
+                        tamanho=len(dados_bytes), extensao=Path(filename).suffix.lower(),
+                        abas=abas,
+                    )
+                    resultados.append({"id": meta.get("id", ""), "nome": filename, "status": "ok"})
             except Exception as e:
                 logger.error(f"Upload error: {e}")
                 resultados.append({"nome": filename, "status": "erro", "mensagem": str(e)})
