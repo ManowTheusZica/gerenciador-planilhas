@@ -1,12 +1,13 @@
 """
 Netlify Function - Wrapper para o Flask app.
-Usa serverless_wsgi para converter entre o formato
-Netlify Function (event/context) e WSGI (Flask).
+Converte o evento da Netlify (API Gateway) para WSGI e vice-versa.
 """
 import os
 import sys
+import io
 import json
 import base64
+import traceback
 from pathlib import Path
 
 # ---- Configura o path para encontrar o app ----
@@ -24,87 +25,118 @@ from app import app as flask_app
 def handler(event, context):
     """
     Handler da Netlify Function.
-    Converte o evento da Netlify para WSGI e retorna a resposta.
+    Converte o evento Netlify → WSGI → Flask → resposta.
     """
     try:
-        # Constrói o WSGI environ a partir do evento da Netlify
+        # --- Extrai dados do evento ---
         method = event.get("httpMethod", "GET")
         path = event.get("path", "/")
-        query_string = event.get("queryStringParameters", {}) or {}
-        headers = event.get("headers", {}) or {}
-        body = event.get("body", "")
-        is_base64 = event.get("isBase64Encoded", False)
+        raw_query = event.get("rawQuery", "") or ""
+        query_params = event.get("queryStringParameters") or {}
+        headers = event.get("headers") or {}
+        body = event.get("body") or ""
+        is_b64 = event.get("isBase64Encoded", False)
 
-        # Reconstrói query string
-        qs_parts = []
-        for k, v in query_string.items():
-            if v is not None:
-                qs_parts.append(f"{k}={v}")
-        qs = "&".join(qs_parts)
+        # Reconstrói query string a partir dos parâmetros (se rawQuery vazio)
+        qs = raw_query
+        if not qs and query_params:
+            qs = "&".join(f"{k}={v}" for k, v in query_params.items() if v is not None)
 
-        # Decodifica body se base64
-        if is_base64 and body:
-            body = base64.b64decode(body).decode("utf-8")
+        # Decodifica body base64 → bytes
+        raw_body: bytes = b""
+        if body:
+            raw_body = base64.b64decode(body) if is_b64 else body.encode("utf-8")
 
-        # Cria environ para o WSGI
+        # --- Monta o WSGI environ ---
         environ = {
             "REQUEST_METHOD": method.upper(),
             "PATH_INFO": path,
             "QUERY_STRING": qs,
+            "SCRIPT_NAME": "",
             "SERVER_NAME": "netlify",
             "SERVER_PORT": "443",
             "SERVER_PROTOCOL": "HTTP/1.1",
             "wsgi.version": (1, 0),
             "wsgi.url_scheme": "https",
-            "wsgi.input": type("BytesIO", (), {"read": lambda s: body.encode("utf-8"), "readline": lambda s: ""}),
-            "wsgi.errors": sys.stderr,
+            "wsgi.input": io.BytesIO(raw_body),
+            "wsgi.errors": io.StringIO(),
             "wsgi.multithread": False,
             "wsgi.multiprocess": False,
             "wsgi.run_once": False,
         }
 
-        # Headers
+        # Headers HTTP → WSGI
         for key, value in headers.items():
-            wsgi_key = f"HTTP_{key.upper().replace('-', '_')}"
-            environ[wsgi_key] = value
+            if key.lower() == "content-type":
+                environ["CONTENT_TYPE"] = value
+            elif key.lower() == "content-length":
+                environ["CONTENT_LENGTH"] = str(value)
+            else:
+                wsgi_key = f"HTTP_{key.upper().replace('-', '_')}"
+                environ[wsgi_key] = value
 
-        # Content-Type e Content-Length
-        if "content-type" in headers:
-            environ["CONTENT_TYPE"] = headers["content-type"]
-        if "content-length" in headers:
-            environ["CONTENT_LENGTH"] = headers["content-length"]
+        if not environ.get("CONTENT_LENGTH") and raw_body:
+            environ["CONTENT_LENGTH"] = str(len(raw_body))
 
-        # Captura a resposta do Flask
-        response_data = {}
+        # --- Processa com Flask ---
+        response_data = {"status": 200, "headers": [], "body": b""}
+
         def start_response(status, response_headers, exc_info=None):
             response_data["status"] = int(status.split(" ")[0])
-            response_data["headers"] = dict(response_headers)
+            response_data["headers"] = list(response_headers)
 
         result = flask_app.wsgi_app(environ, start_response)
-        body_bytes = b"".join(result) if isinstance(result, (list, tuple)) else result
 
-        status = response_data.get("status", 200)
-        response_headers = response_data.get("headers", {})
+        # Junta o body (pode ser iterável de bytes ou strings)
+        body_chunks = []
+        for chunk in result:
+            if isinstance(chunk, str):
+                body_chunks.append(chunk.encode("utf-8"))
+            else:
+                body_chunks.append(chunk)
+        response_data["body"] = b"".join(body_chunks) if body_chunks else b""
 
-        # Converte body para base64 se for binário
-        output = body_bytes.decode("utf-8") if isinstance(body_bytes, bytes) else body_bytes
-        is_base64 = False
-        response_type = response_headers.get("Content-Type", response_headers.get("content-type", ""))
-        if "application" in response_type or "octet" in response_type:
-            output = base64.b64encode(body_bytes).decode("utf-8") if isinstance(body_bytes, bytes) else base64.b64encode(output.encode()).decode()
-            is_base64 = True
+        # --- Converte a resposta para o formato Netlify ---
+        status = response_data["status"]
+        response_headers = {}
+        has_binary = False
+        for key, value in response_data["headers"]:
+            # Agrupa headers com mesmo nome (ex: Set-Cookie)
+            if key in response_headers:
+                response_headers[key] = f"{response_headers[key]}, {value}"
+            else:
+                response_headers[key] = value
+            if key.lower() == "content-type":
+                ct = value.lower()
+                if "application" in ct or "octet" in ct or "image" in ct:
+                    has_binary = True
 
-        return {
-            "statusCode": status,
-            "headers": response_headers,
-            "body": output,
-            "isBase64Encoded": is_base64,
-        }
+        body_bytes = response_data["body"]
+
+        # Se for binário, codifica em base64
+        if has_binary and body_bytes:
+            output = base64.b64encode(body_bytes).decode("utf-8")
+            return {
+                "statusCode": status,
+                "headers": response_headers,
+                "body": output,
+                "isBase64Encoded": True,
+            }
+        else:
+            output = body_bytes.decode("utf-8", errors="replace") if body_bytes else ""
+            return {
+                "statusCode": status,
+                "headers": response_headers,
+                "body": output,
+                "isBase64Encoded": False,
+            }
 
     except Exception as e:
+        tb = traceback.format_exc()
+        print(f"[api.py ERROR] {e}\n{tb}", file=sys.stderr)
         return {
             "statusCode": 500,
             "headers": {"Content-Type": "application/json"},
-            "body": json.dumps({"erro": str(e)}),
+            "body": json.dumps({"erro": str(e), "detalhe": tb}),
             "isBase64Encoded": False,
         }
