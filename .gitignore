@@ -26,3 +26,8 @@ metadata.json
 dist/
 build/
 *.spec
+
+# Setup scripts (contêm tokens/senhas temporários)
+setup_*.py
+get_*.py
+env_temp*
