@@ -590,9 +590,10 @@ def api_scan():
 # =============================================================================
 
 if __name__ == "__main__":
+    port = int(os.getenv("PORT", 5000))
     print("=" * 60)
     print("  📊 Gerenciador de Planilhas")
     print(f"  Modo: {'Netlify + Supabase' if IS_NETLIFY else 'Local (arquivos)'}")
-    print("  Abra http://localhost:5000 no navegador")
+    print(f"  Porta: {port}")
     print("=" * 60)
-    app.run(debug=True, host="0.0.0.0", port=5000)
+    app.run(debug=True, host="0.0.0.0", port=port)
