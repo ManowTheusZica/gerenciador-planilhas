@@ -260,6 +260,9 @@
                         <button class="btn btn-sm btn-outline" onclick="substituirPlanilha()" title="Substituir arquivo mantendo metadados">
                             <i class="fas fa-sync-alt"></i> Substituir
                         </button>
+                        <button class="btn btn-sm btn-primary" onclick="entrarModoEdicao()" id="btnEditar" style="display:none">
+                            <i class="fas fa-pen"></i> Editar
+                        </button>
                         <button class="btn btn-sm btn-danger" onclick="deletarPlanilha()">
                             <i class="fas fa-trash"></i> Excluir
                         </button>
@@ -299,6 +302,20 @@
                     </div>
                 </div>
 
+                <!-- Barra de edição colaborativa -->
+                <div class="edit-toolbar" id="editToolbar" style="display:none">
+                    <div class="edit-toolbar-left">
+                        <span class="edit-mode-badge"><i class="fas fa-pen"></i> Modo Edição</span>
+                        <span class="edit-users" id="editUsers"><i class="fas fa-users"></i> <span id="userCount">1</span> conectado(s)</span>
+                        <span class="autosave-status" id="autosaveStatus"><i class="fas fa-check-circle"></i> Salvando automático</span>
+                    </div>
+                    <div class="edit-toolbar-right">
+                        <button class="btn btn-sm btn-outline" onclick="sairModoEdicao()">
+                            <i class="fas fa-times"></i> Fechar
+                        </button>
+                    </div>
+                </div>
+
                 <!-- Preview da planilha -->
                 <div class="detalhes-preview">
                     <div class="preview-tabs" id="previewTabs">
@@ -318,6 +335,7 @@
     <!-- ========== TOAST NOTIFICATION ========== -->
     <div class="toast-container" id="toastContainer"></div>
 
+    <script src="/socket.io/socket.io.js"></script>
     <script>
         // ===================================================================
         // VARIÁVEIS GLOBAIS
@@ -713,6 +731,9 @@
                 // Descrição
                 document.getElementById('descricaoInput').value = planilha.descricao || '';
 
+                // Mostra botão Editar
+                document.getElementById('btnEditar').style.display = 'inline-flex';
+
                 // Preview
                 carregarPreview(id);
 
@@ -724,7 +745,415 @@
 
         function fecharDetalhes() {
             document.getElementById('modalDetalhes').style.display = 'none';
+            sairModoEdicao();
             planilhaAtualId = null;
+            desconectarSocket();
+        }
+
+        // ===================================================================
+        // EDIÇÃO COLABORATIVA (Socket.IO)
+        // ===================================================================
+        let socket = null;
+        let modoEdicao = false;
+        let editData = null;
+        let autosaveTimer = null;
+        let dirty = false;
+        let salvando = false;
+        const AUTOSAVE_INTERVAL = 3000; // 3 segundos
+
+        function marcarSujo() {
+            if (!dirty) {
+                dirty = true;
+                document.getElementById('autosaveStatus').innerHTML = '<i class="fas fa-pen"></i> Não salvo';
+                document.getElementById('autosaveStatus').className = 'autosave-status dirty';
+            }
+        }
+
+        function desconectarSocket() {
+            if (autosaveTimer) {
+                clearInterval(autosaveTimer);
+                autosaveTimer = null;
+            }
+            if (socket) {
+                if (planilhaAtualId) {
+                    socket.emit('leave_planilha', { planilha_id: planilhaAtualId });
+                }
+                socket.disconnect();
+                socket = null;
+            }
+            dirty = false;
+            salvando = false;
+        }
+
+        function conectarSocket(planilhaId) {
+            desconectarSocket();
+            socket = io(null, { transports: ['websocket', 'polling'] });
+
+            socket.on('connect', () => {
+                socket.emit('join_planilha', { planilha_id: planilhaId });
+            });
+
+            socket.on('celula_atualizada', (data) => {
+                if (!modoEdicao) return;
+                const cell = document.querySelector(
+                    `[data-sheet="${data.sheet}"][data-row="${data.row}"][data-col="${data.col}"]`
+                );
+                if (cell) {
+                    cell.textContent = data.valor ?? '';
+                    cell.dataset.valor = data.valor ?? '';
+                    cell.classList.add('cell-updated');
+                    setTimeout(() => cell.classList.remove('cell-updated'), 1500);
+                }
+            });
+
+            socket.on('linha_adicionada', (data) => {
+                if (!modoEdicao) return;
+                recarregarGrade();
+            });
+
+            socket.on('linha_removida', (data) => {
+                if (!modoEdicao) return;
+                recarregarGrade();
+            });
+
+            socket.on('coluna_adicionada', (data) => {
+                if (!modoEdicao) return;
+                recarregarGrade();
+            });
+
+            socket.on('coluna_removida', (data) => {
+                if (!modoEdicao) return;
+                recarregarGrade();
+            });
+
+            socket.on('planilha_salva', (data) => {
+                if (data.planilha_id === planilhaAtualId) {
+                    mostrarToast('Planilha salva por outro usuário', 'info');
+                }
+            });
+
+            socket.on('usuarios_na_sala', (data) => {
+                document.getElementById('userCount').textContent = data.count;
+            });
+
+            socket.on('disconnect', () => {
+                document.getElementById('userCount').textContent = '0';
+            });
+        }
+
+        function recarregarGrade() {
+            if (!planilhaAtualId) return;
+            carregarDadosEdicao(planilhaAtualId);
+        }
+
+        async function carregarDadosEdicao(planilhaId) {
+            try {
+                const res = await fetch(`/api/planilhas/${planilhaId}/edit-data`);
+                editData = await res.json();
+                if (editData.erro) {
+                    mostrarToast(editData.erro, 'error');
+                    return;
+                }
+                renderizarGradeEditavel(editData);
+            } catch (err) {
+                mostrarToast('Erro ao carregar dados para edição', 'error');
+            }
+        }
+
+        function renderizarGradeEditavel(data) {
+            const tabs = document.getElementById('previewTabs');
+            const content = document.getElementById('previewContent');
+            const sheets = data.sheets;
+            const sheetNames = data.sheet_names || Object.keys(sheets);
+
+            if (sheetNames.length === 0) {
+                content.innerHTML = '<div class="preview-empty">Nenhum dado</div>';
+                return;
+            }
+
+            // Tabs
+            tabs.innerHTML = sheetNames.map((name, i) => {
+                const s = sheets[name];
+                const total = s.linhas ? s.linhas.length : 0;
+                return `<button class="preview-tab ${i === 0 ? 'active' : ''}"
+                    onclick="mostrarAbaEditavel('${name}')">
+                    ${name}
+                    <span class="aba-count">${total} linhas</span>
+                </button>`;
+            }).join('');
+
+            // Primeira aba
+            if (sheetNames.length > 0) {
+                mostrarAbaEditavel(sheetNames[0]);
+            }
+        }
+
+        function mostrarAbaEditavel(sheetName) {
+            const tabs = document.querySelectorAll('.preview-tab');
+            tabs.forEach(t => t.classList.toggle('active', t.textContent.trim().startsWith(sheetName)));
+
+            const content = document.getElementById('previewContent');
+            if (!editData || !editData.sheets || !editData.sheets[sheetName]) {
+                content.innerHTML = '<div class="preview-empty">Aba não encontrada</div>';
+                return;
+            }
+
+            const sheet = editData.sheets[sheetName];
+            const colunas = sheet.colunas || [];
+            const linhas = sheet.linhas || [];
+
+            if (colunas.length === 0) {
+                content.innerHTML = '<div class="preview-empty">Nenhuma coluna</div>';
+                return;
+            }
+
+            let html = '<div class="table-wrapper"><table class="preview-table edit-table" id="editTable">';
+
+            // Header com botão de nova coluna
+            html += '<thead><tr>';
+            html += '<th class="row-header">#</th>';
+            colunas.forEach((c, ci) => {
+                html += `<th class="editable-col-header" data-sheet="${sheetName}" data-col="${ci}">
+                    <span class="col-name">${c}</span>
+                    <span class="col-actions">
+                        <i class="fas fa-times col-remove" onclick="removerColuna('${sheetName}', ${ci})" title="Remover coluna"></i>
+                    </span>
+                </th>`;
+            });
+            html += `<th class="add-col-cell"><i class="fas fa-plus" onclick="adicionarColuna('${sheetName}')" title="Nova coluna"></i></th>`;
+            html += '</tr></thead>';
+
+            // Body
+            html += '<tbody>';
+            linhas.forEach((linha, ri) => {
+                html += '<tr>';
+                html += `<td class="row-header">
+                    <span class="row-num">${ri + 1}</span>
+                    <i class="fas fa-times row-remove" onclick="removerLinha('${sheetName}', ${ri})" title="Remover linha"></i>
+                </td>`;
+                colunas.forEach((_, ci) => {
+                    const valor = linha[ci] !== null && linha[ci] !== undefined ? String(linha[ci]) : '';
+                    html += `<td class="editable-cell" contenteditable="true"
+                        data-sheet="${sheetName}" data-row="${ri}" data-col="${ci}"
+                        data-valor="${valor.replace(/"/g, '&quot;')}"
+                        onblur="onCelulaEditada(this)"
+                        onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}"
+                        title="${valor.replace(/"/g, '&quot;')}">${valor}</td>`;
+                });
+                html += '<td class="empty-cell"></td>';
+                html += '</tr>';
+            });
+            html += '</tbody>';
+
+            // Footer com botão de nova linha
+            html += '<tfoot><tr><td colspan="' + (colunas.length + 2) + '" class="add-row-cell">';
+            html += `<button class="btn btn-sm btn-outline" onclick="adicionarLinha('${sheetName}')">
+                <i class="fas fa-plus"></i> Nova linha
+            </button>`;
+            html += '</td></tr></tfoot>';
+
+            html += '</table></div>';
+
+            // Info
+            html += `<div class="preview-info">${linhas.length} linha(s), ${colunas.length} coluna(s)</div>`;
+
+            content.innerHTML = html;
+        }
+
+        function onCelulaEditada(cell) {
+            const sheet = cell.dataset.sheet;
+            const row = parseInt(cell.dataset.row);
+            const col = parseInt(cell.dataset.col);
+            const valor = cell.textContent.trim();
+            const valorAntigo = cell.dataset.valor;
+
+            if (valor === valorAntigo) return;
+
+            cell.dataset.valor = valor;
+            cell.classList.add('cell-edited');
+            setTimeout(() => cell.classList.remove('cell-edited'), 2000);
+
+            // Atualiza dados locais
+            if (editData && editData.sheets && editData.sheets[sheet]) {
+                if (editData.sheets[sheet].linhas[row]) {
+                    editData.sheets[sheet].linhas[row][col] = valor;
+                }
+            }
+
+            // Envia via socket
+            if (socket && socket.connected) {
+                socket.emit('celula_editada', {
+                    planilha_id: planilhaAtualId,
+                    sheet: sheet,
+                    row: row,
+                    col: col,
+                    valor: valor,
+                });
+            }
+
+            marcarSujo();
+        }
+
+        function adicionarLinha(sheetName) {
+            if (!editData || !editData.sheets[sheetName]) return;
+            const colunas = editData.sheets[sheetName].colunas || [];
+            const nova = Array(colunas.length).fill(null);
+            editData.sheets[sheetName].linhas.push(nova);
+            marcarSujo();
+            mostrarAbaEditavel(sheetName);
+
+            if (socket && socket.connected) {
+                socket.emit('linha_adicionada', {
+                    planilha_id: planilhaAtualId,
+                    sheet: sheetName,
+                    index: editData.sheets[sheetName].linhas.length - 1,
+                });
+            }
+        }
+
+        function removerLinha(sheetName, index) {
+            if (!editData || !editData.sheets[sheetName]) return;
+            if (!confirm(`Remover linha ${index + 1}?`)) return;
+            editData.sheets[sheetName].linhas.splice(index, 1);
+            marcarSujo();
+            mostrarAbaEditavel(sheetName);
+
+            if (socket && socket.connected) {
+                socket.emit('linha_removida', {
+                    planilha_id: planilhaAtualId,
+                    sheet: sheetName,
+                    index: index,
+                });
+            }
+        }
+
+        function adicionarColuna(sheetName) {
+            if (!editData || !editData.sheets[sheetName]) return;
+            const nome = prompt('Nome da nova coluna:');
+            if (!nome || !nome.trim()) return;
+            const colunas = editData.sheets[sheetName].colunas;
+            colunas.push(nome.trim());
+            for (const linha of editData.sheets[sheetName].linhas) {
+                linha.push(null);
+            }
+            marcarSujo();
+            mostrarAbaEditavel(sheetName);
+
+            if (socket && socket.connected) {
+                socket.emit('coluna_adicionada', {
+                    planilha_id: planilhaAtualId,
+                    sheet: sheetName,
+                    nome: nome.trim(),
+                    index: colunas.length - 1,
+                });
+            }
+        }
+
+        function removerColuna(sheetName, index) {
+            if (!editData || !editData.sheets[sheetName]) return;
+            const colNome = editData.sheets[sheetName].colunas[index];
+            if (!confirm(`Remover coluna "${colNome}"?`)) return;
+            editData.sheets[sheetName].colunas.splice(index, 1);
+            for (const linha of editData.sheets[sheetName].linhas) {
+                linha.splice(index, 1);
+            }
+            marcarSujo();
+            mostrarAbaEditavel(sheetName);
+
+            if (socket && socket.connected) {
+                socket.emit('coluna_removida', {
+                    planilha_id: planilhaAtualId,
+                    sheet: sheetName,
+                    index: index,
+                });
+            }
+        }
+
+        async function entrarModoEdicao() {
+            if (!planilhaAtualId) return;
+            modoEdicao = true;
+            dirty = false;
+            salvando = false;
+
+            document.getElementById('editToolbar').style.display = 'flex';
+            document.getElementById('btnEditar').style.display = 'none';
+            document.getElementById('autosaveStatus').innerHTML = '<i class="fas fa-check-circle"></i> Salvando automático';
+
+            conectarSocket(planilhaAtualId);
+            await carregarDadosEdicao(planilhaAtualId);
+
+            // Inicia autosave
+            if (autosaveTimer) clearInterval(autosaveTimer);
+            autosaveTimer = setInterval(autosaveTick, AUTOSAVE_INTERVAL);
+        }
+
+        async function sairModoEdicao() {
+            modoEdicao = false;
+            if (autosaveTimer) {
+                clearInterval(autosaveTimer);
+                autosaveTimer = null;
+            }
+            // Salva pendências antes de sair
+            if (dirty && planilhaAtualId && editData && !salvando) {
+                const statusEl = document.getElementById('autosaveStatus');
+                statusEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Salvando antes de fechar...';
+                await salvarEdicao(true);
+            }
+            document.getElementById('editToolbar').style.display = 'none';
+            document.getElementById('btnEditar').style.display = planilhaAtualId ? 'inline-flex' : 'none';
+            if (planilhaAtualId) {
+                carregarPreview(planilhaAtualId);
+            }
+        }
+
+        async function autosaveTick() {
+            if (!dirty || salvando || !planilhaAtualId || !editData) return;
+            await salvarEdicao(true);
+        }
+
+        async function salvarEdicao(silent = false) {
+            if (!planilhaAtualId || !editData) return;
+            if (salvando) return;
+            salvando = true;
+            dirty = false;
+
+            const statusEl = document.getElementById('autosaveStatus');
+            statusEl.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Salvando...';
+            statusEl.className = 'autosave-status saving';
+
+            try {
+                const res = await fetch(`/api/planilhas/${planilhaAtualId}/save`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ sheets: editData.sheets }),
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    statusEl.innerHTML = '<i class="fas fa-check-circle"></i> Auto salvo';
+                    statusEl.className = 'autosave-status';
+                    if (!silent) {
+                        mostrarToast('Planilha salva!', 'success');
+                    }
+                    carregarPlanilhas();
+                    carregarStats();
+                } else {
+                    statusEl.innerHTML = '<i class="fas fa-exclamation-circle"></i> Erro ao salvar';
+                    statusEl.className = 'autosave-status error';
+                    dirty = true;
+                    if (!silent) {
+                        mostrarToast(data.erro || 'Erro ao salvar', 'error');
+                    }
+                }
+            } catch (err) {
+                statusEl.innerHTML = '<i class="fas fa-exclamation-circle"></i> Erro de conexão';
+                statusEl.className = 'autosave-status error';
+                dirty = true;
+                if (!silent) {
+                    mostrarToast('Erro de conexão ao salvar', 'error');
+                }
+            } finally {
+                salvando = false;
+            }
         }
 
         // ===================================================================

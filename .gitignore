@@ -1,26 +1,59 @@
 # Python
 __pycache__/
 *.py[cod]
+*.pyo
+*.pyd
+*.so
+.Python
 *.egg-info/
+dist/
+build/
+*.egg
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+.installed.cfg
+
+# Virtual environments
 .venv/
 venv/
 env/
+ENV/
 
 # IDE
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
 
-# Environment
+# Environment variables
 .env
 .env.local
+!.env.example
 
 # OS
 .DS_Store
 Thumbs.db
+desktop.ini
 
-# Uploads (local)
-uploads/
+# Uploads e dados locais (não versionar)
+uploads/*
+!uploads/.gitkeep
 metadata.json
+notificacoes.json
+
+# Backups e versões (dados sensíveis)
+backups/
+versions/
+indice_busca/
+
+# Logs
+logs/
+*.log
 
 # Build
 dist/
@@ -31,3 +64,12 @@ build/
 setup_*.py
 get_*.py
 env_temp*
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Distribution
+*.tar.gz
+*.zip
