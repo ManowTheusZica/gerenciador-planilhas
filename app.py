@@ -1,8 +1,10 @@
 """
-Gerenciador de Planilhas - Web App
+Gerenciador de Planilhas - Web App v2.0
 ====================================
 Gerencia e organiza todas as planilhas em um só lugar,
 com upload, visualização, busca e categorização.
+
+Versão 2.0: Correção do schema Supabase (tabela planilhas criada)
 
 Uso:
     python app.py
