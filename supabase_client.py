@@ -64,30 +64,48 @@ def _inicializar_bucket() -> None:
 
 def listar_planilhas() -> List[Dict[str, Any]]:
     """Lista todas as planilhas com metadados."""
-    supabase = get_client()
-    resp = supabase.table("planilhas").select("*").order("favorito", desc=True).order("nome").execute()
-    dados: List[Dict[str, Any]] = []
-    for row in resp.data:
-        if not isinstance(row, dict):
-            continue
-        row_dict: Dict[str, Any] = dict(row)
-        row_dict["tags"] = row_dict.get("tags") or []
-        row_dict["abas"] = row_dict.get("abas") or []
-        row_dict["favorito"] = bool(row_dict.get("favorito", False))
-        dados.append(_row_para_dict(row_dict))
-    return dados
+    try:
+        supabase = get_client()
+        resp = supabase.table("planilhas").select("*").order("favorito", desc=True).order("nome").execute()
+        
+        if hasattr(resp, 'error') and resp.error:
+            logger.error(f"Erro ao listar planilhas: {resp.error}")
+            return []
+        
+        dados: List[Dict[str, Any]] = []
+        for row in resp.data or []:
+            if not isinstance(row, dict):
+                continue
+            row_dict: Dict[str, Any] = dict(row)
+            row_dict["tags"] = row_dict.get("tags") or []
+            row_dict["abas"] = row_dict.get("abas") or []
+            row_dict["favorito"] = bool(row_dict.get("favorito", False))
+            dados.append(_row_para_dict(row_dict))
+        return dados
+    except Exception as e:
+        logger.error(f"Erro em listar_planilhas: {type(e).__name__}: {e}")
+        return []
 
 
 def obter_planilha(planilha_id: str) -> Optional[Dict[str, Any]]:
     """Obtém uma planilha pelo ID."""
-    supabase = get_client()
-    resp = supabase.table("planilhas").select("*").eq("id", planilha_id).execute()
-    if not resp.data:
+    try:
+        supabase = get_client()
+        resp = supabase.table("planilhas").select("*").eq("id", planilha_id).execute()
+        
+        if hasattr(resp, 'error') and resp.error:
+            logger.error(f"Erro ao obter planilha {planilha_id}: {resp.error}")
+            return None
+        
+        if not resp.data:
+            return None
+        row = resp.data[0]
+        if not isinstance(row, dict):
+            return None
+        return _row_para_dict(dict(row))
+    except Exception as e:
+        logger.error(f"Erro em obter_planilha: {type(e).__name__}: {e}")
         return None
-    row = resp.data[0]
-    if not isinstance(row, dict):
-        return None
-    return _row_para_dict(dict(row))
 
 
 def obter_planilha_por_nome(nome: str) -> Optional[Dict[str, Any]]:
@@ -105,26 +123,35 @@ def obter_planilha_por_nome(nome: str) -> Optional[Dict[str, Any]]:
 def criar_planilha(nome: str, storage_path: str, tamanho: int,
                    extensao: str, abas: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Cria um novo registro de planilha."""
-    supabase = get_client()
-    now = datetime.now().isoformat()
-    data: Dict[str, Any] = {
-        "nome": nome,
-        "storage_path": storage_path,
-        "tamanho": tamanho,
-        "tamanho_formatado": _formatar_tamanho(tamanho),
-        "extensao": extensao,
-        "ultima_modificacao": now,
-        "data_upload": now,
-        "descricao": "",
-        "favorito": False,
-        "categoria": "",
-        "tags": [],
-        "abas": json.dumps(abas, ensure_ascii=False),
-    }
-    resp = supabase.table("planilhas").insert(data).execute()
-    if resp.data and isinstance(resp.data[0], dict):
-        return _row_para_dict(dict(resp.data[0]))
-    return data
+    try:
+        supabase = get_client()
+        now = datetime.now().isoformat()
+        data: Dict[str, Any] = {
+            "nome": nome,
+            "storage_path": storage_path,
+            "tamanho": tamanho,
+            "tamanho_formatado": _formatar_tamanho(tamanho),
+            "extensao": extensao,
+            "ultima_modificacao": now,
+            "data_upload": now,
+            "descricao": "",
+            "favorito": False,
+            "categoria": "",
+            "tags": [],
+            "abas": json.dumps(abas, ensure_ascii=False),
+        }
+        resp = supabase.table("planilhas").insert(data).execute()
+        
+        if hasattr(resp, 'error') and resp.error:
+            logger.error(f"Erro ao criar planilha: {resp.error}")
+            raise RuntimeError(f"Falha ao criar planilha: {resp.error}")
+        
+        if resp.data and isinstance(resp.data[0], dict):
+            return _row_para_dict(dict(resp.data[0]))
+        return data
+    except Exception as e:
+        logger.error(f"Erro em criar_planilha: {type(e).__name__}: {e}")
+        raise
 
 
 def atualizar_planilha(planilha_id: str, dados: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -180,28 +207,46 @@ def _row_para_dict(row: Dict[str, Any]) -> Dict[str, Any]:
 
 def listar_tags_categorias() -> Dict[str, List[str]]:
     """Lista todas as tags e categorias em uso."""
-    supabase = get_client()
-    resp = supabase.table("planilhas").select("tags,categoria").execute()
-    todas_tags: Set[str] = set()
-    categorias: Set[str] = set()
-    for row in resp.data:
-        if not isinstance(row, dict):
-            continue
-        raw_tags = row.get("tags") or []
-        if isinstance(raw_tags, str):
-            raw_tags = json.loads(raw_tags)
-        if isinstance(raw_tags, list):
-            # Percorre lista de tags (o tipo JSON é complexo, mas só usamos strings)
-            for item in raw_tags:  # type: ignore[union-attr]
-                if isinstance(item, str) and item.strip():
-                    todas_tags.add(item.strip())
-        cat = row.get("categoria")
-        if isinstance(cat, str) and cat:
-            categorias.add(cat)
-    return {
-        "tags": sorted(t for t in todas_tags if t),
-        "categorias": sorted(c for c in categorias if c),
-    }
+    try:
+        supabase = get_client()
+        resp = supabase.table("planilhas").select("tags,categoria").execute()
+        
+        # Verificar se há erro na resposta
+        if hasattr(resp, 'error') and resp.error:
+            logger.error(f"Erro ao consultar tabela planilhas: {resp.error}")
+            return {"tags": [], "categorias": []}
+        
+        todas_tags: Set[str] = set()
+        categorias: Set[str] = set()
+        
+        if not resp.data:
+            logger.info("Nenhuma planilha encontrada na tabela")
+            return {"tags": [], "categorias": []}
+            
+        for row in resp.data:
+            if not isinstance(row, dict):
+                continue
+            raw_tags = row.get("tags") or []
+            if isinstance(raw_tags, str):
+                raw_tags = json.loads(raw_tags)
+            if isinstance(raw_tags, list):
+                # Percorre lista de tags (o tipo JSON é complexo, mas só usamos strings)
+                for item in raw_tags:  # type: ignore[union-attr]
+                    if isinstance(item, str) and item.strip():
+                        todas_tags.add(item.strip())
+            cat = row.get("categoria")
+            if isinstance(cat, str) and cat:
+                categorias.add(cat)
+                
+        return {
+            "tags": sorted(t for t in todas_tags if t),
+            "categorias": sorted(c for c in categorias if c),
+        }
+    except Exception as e:
+        logger.error(f"Erro em listar_tags_categorias: {type(e).__name__}: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        return {"tags": [], "categorias": []}
 
 
 # ---------------------------------------------------------------------------
