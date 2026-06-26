@@ -68,12 +68,12 @@ def listar_planilhas() -> List[Dict[str, Any]]:
         supabase = get_client()
         resp = supabase.table("planilhas").select("*").order("favorito", desc=True).order("nome").execute()
         
-        if hasattr(resp, 'error') and resp.error:
-            logger.error(f"Erro ao listar planilhas: {resp.error}")
+        if not resp.data:
+            logger.warning("Nenhuma planilha encontrada")
             return []
         
         dados: List[Dict[str, Any]] = []
-        for row in resp.data or []:
+        for row in resp.data:
             if not isinstance(row, dict):
                 continue
             row_dict: Dict[str, Any] = dict(row)
@@ -93,12 +93,9 @@ def obter_planilha(planilha_id: str) -> Optional[Dict[str, Any]]:
         supabase = get_client()
         resp = supabase.table("planilhas").select("*").eq("id", planilha_id).execute()
         
-        if hasattr(resp, 'error') and resp.error:
-            logger.error(f"Erro ao obter planilha {planilha_id}: {resp.error}")
-            return None
-        
         if not resp.data:
             return None
+        
         row = resp.data[0]
         if not isinstance(row, dict):
             return None
@@ -142,11 +139,10 @@ def criar_planilha(nome: str, storage_path: str, tamanho: int,
         }
         resp = supabase.table("planilhas").insert(data).execute()
         
-        if hasattr(resp, 'error') and resp.error:
-            logger.error(f"Erro ao criar planilha: {resp.error}")
-            raise RuntimeError(f"Falha ao criar planilha: {resp.error}")
+        if not resp.data:
+            raise RuntimeError("Falha ao criar planilha: nenhum dado retornado")
         
-        if resp.data and isinstance(resp.data[0], dict):
+        if isinstance(resp.data[0], dict):
             return _row_para_dict(dict(resp.data[0]))
         return data
     except Exception as e:
@@ -211,17 +207,13 @@ def listar_tags_categorias() -> Dict[str, List[str]]:
         supabase = get_client()
         resp = supabase.table("planilhas").select("tags,categoria").execute()
         
-        # Verificar se há erro na resposta
-        if hasattr(resp, 'error') and resp.error:
-            logger.error(f"Erro ao consultar tabela planilhas: {resp.error}")
+        # Verificar se há dados na resposta
+        if not resp.data:
+            logger.info("Nenhuma planilha encontrada na tabela")
             return {"tags": [], "categorias": []}
         
         todas_tags: Set[str] = set()
         categorias: Set[str] = set()
-        
-        if not resp.data:
-            logger.info("Nenhuma planilha encontrada na tabela")
-            return {"tags": [], "categorias": []}
             
         for row in resp.data:
             if not isinstance(row, dict):
