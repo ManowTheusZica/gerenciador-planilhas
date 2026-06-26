@@ -63,8 +63,30 @@ METADATA_FILE = BASE_DIR / "metadata.json"
 ALLOWED_EXTENSIONS = {".xls", ".xlsx", ".xlsm", ".csv", ".ods"}
 MAX_CONTENT_LENGTH = 100 * 1024 * 1024  # 100MB
 
-# Detecta se estamos no Netlify (variáveis de ambiente)
-IS_NETLIFY = bool(os.getenv("SUPABASE_URL")) or os.getenv("NETLIFY", "").lower() == "true"
+# Logger (precisa ser definido antes de qualquer uso)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger("app")
+
+# Detecta se estamos no Netlify/Render (variáveis de ambiente)
+# NOTA: NETLIFY=true no .env local, mas no Render as variáveis devem ser configuradas no painel
+NETLIFY_ENV = os.getenv("NETLIFY", "").lower() == "true"
+SUPABASE_URL_CONFIG = bool(os.getenv("SUPABASE_URL"))
+SUPABASE_KEY_CONFIG = bool(os.getenv("SUPABASE_SERVICE_KEY"))
+
+# Só usa modo cloud se BOTH URL e KEY estiverem configurados
+IS_CLOUD_MODE = SUPABASE_URL_CONFIG and SUPABASE_KEY_CONFIG
+
+if IS_CLOUD_MODE:
+    logger.info("🔵 Modo Cloud (Supabase)")
+elif NETLIFY_ENV and not IS_CLOUD_MODE:
+    logger.warning("⚠️  NETLIFY=true mas Supabase não configurado. Usando modo local.")
+    logger.warning("   Configure SUPABASE_URL e SUPABASE_SERVICE_KEY no painel do Render")
+else:
+    logger.info("🟢 Modo Local (arquivos + JSON)")
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_LENGTH
@@ -79,14 +101,6 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 # planilha_cache: {planilha_id: {meta: {...}, sheets: {sheet_name: {colunas: [...], linhas: [[...]]}}}}
 planilha_cache: Dict[str, Dict[str, Any]] = {}
 cache_lock = threading.Lock()
-
-# Logger
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logger = logging.getLogger("app")
 
 # Backend de armazenamento
 import supabase_client as _supabase_module  # type: ignore
