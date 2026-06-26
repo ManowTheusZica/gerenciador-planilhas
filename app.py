@@ -106,16 +106,10 @@ cache_lock = threading.Lock()
 import supabase_client as _supabase_module  # type: ignore
 storage_backend: Any = None
 
-# Verifica se o Supabase está realmente configurado (variáveis de ambiente presentes)
-supabase_configurado = bool(os.getenv("SUPABASE_URL")) and bool(os.getenv("SUPABASE_SERVICE_KEY"))
-
-if IS_NETLIFY and supabase_configurado:
-    logger.info("🔵 Modo Netlify + Supabase")
+if IS_CLOUD_MODE:
+    logger.info("🔵 Modo Cloud (Supabase)")
     storage_backend = _supabase_module
 else:
-    if IS_NETLIFY and not supabase_configurado:
-        logger.warning("⚠️  NETLIFY=true mas Supabase não configurado. Usando modo local.")
-        logger.warning("   Configure SUPABASE_URL e SUPABASE_SERVICE_KEY nas variáveis de ambiente do Render")
     logger.info("🟢 Modo Local (arquivos + JSON)")
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
     # Tenta importar supabase_client (pode não estar instalado localmente)
