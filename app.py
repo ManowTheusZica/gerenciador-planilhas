@@ -79,6 +79,7 @@ SUPABASE_KEY_CONFIG = bool(os.getenv("SUPABASE_SERVICE_KEY"))
 
 # Só usa modo cloud se BOTH URL e KEY estiverem configurados
 IS_CLOUD_MODE = SUPABASE_URL_CONFIG and SUPABASE_KEY_CONFIG
+IS_NETLIFY = IS_CLOUD_MODE  # Alias para compatibilidade com código existente
 
 if IS_CLOUD_MODE:
     logger.info("🔵 Modo Cloud (Supabase)")
