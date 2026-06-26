@@ -13,4 +13,5 @@ simple-websocket>=1.0
 reportlab>=4.0
 whoosh>=2.7
 pillow>=10.0
-eventlet>=0.33
+gevent>=23.0
+gevent-websocket>=0.10
