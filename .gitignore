@@ -65,6 +65,10 @@ setup_*.py
 get_*.py
 env_temp*
 
+# Docs com credenciais
+DEPLOY_INSTRUCOES.md
+DEPLOY.md
+
 # Testing
 .pytest_cache/
 .coverage

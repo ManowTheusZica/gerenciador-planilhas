@@ -19,7 +19,7 @@ import hashlib
 import logging
 import threading
 import mimetypes
-from collections import defaultdict  # type: ignore[unused-import]
+
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -92,6 +92,7 @@ else:
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = MAX_CONTENT_LENGTH
 app.config["UPLOAD_FOLDER"] = str(UPLOAD_FOLDER)
+app.secret_key = os.getenv("FLASK_SECRET", "dev-secret-key-change-in-production")
 
 # ---------------------------------------------------------------------------
 # Socket.IO (colaboração em tempo real)
@@ -483,13 +484,14 @@ def _update_planilha(pid: str, data: Dict[str, Any]) -> None:
         metadados[pid].update(data)
         _salvar_metadados(metadados)
 
-def _delete_planilha(pid: str) -> None:
+def _delete_planilha(pid: str) -> bool:
     if _supabase_disponivel():
         try:
             storage_backend.deletar_planilha(pid)  # type: ignore[union-attr]
+            return True
         except Exception as e:
             logger.error(f"Supabase delete error: {e}")
-        return
+            return False
     metadados = _carregar_metadados()
     meta = metadados.pop(pid, None)
     if meta:
@@ -497,6 +499,8 @@ def _delete_planilha(pid: str) -> None:
         if caminho.exists():
             caminho.unlink()
         _salvar_metadados(metadados)
+        return True
+    return False
 
 
 # =============================================================================
@@ -1609,125 +1613,93 @@ def _contar_usuarios_sala(planilha_id: str) -> int:
 
 
 # =============================================================================
-# SOCKET.IO - Eventos de colaboração em tempo real
+# SOCKET.IO - COLABORAÇÃO EM TEMPO REAL
 # =============================================================================
 
-@socketio.on("connect")
-def handle_connect():
-    logger.info(f"Cliente conectado: {request.sid}")  # type: ignore[attr-defined]
+@socketio.on('connect')
+def handle_socket_connect():
+    logger.info(f"Cliente conectado: {request.sid}")
 
+@socketio.on('disconnect')
+def handle_socket_disconnect():
+    logger.info(f"Cliente desconectado: {request.sid}")
 
-@socketio.on("disconnect")
-def handle_disconnect():
-    logger.info(f"Cliente desconectado: {request.sid}")  # type: ignore[attr-defined]
-
-
-@socketio.on("join_planilha")
-def handle_join(data: dict[str, Any]):
+@socketio.on('join_planilha')
+def handle_join(data):
     planilha_id = data.get("planilha_id")
     if not planilha_id:
         return
-
     join_room(planilha_id)
-
-    # Garante que a planilha está no cache
     with cache_lock:
         if planilha_id not in planilha_cache:
             _carregar_planilha_cache(planilha_id)
-
-    # Informa os outros na sala
-    emit("usuario_entrou", {"sid": request.sid}, room=planilha_id, skip_sid=request.sid)  # type: ignore[call-arg,attr-defined]
-
-    # Conta quantos usuarios estão na sala (inclui o que entrou)
+    emit("usuario_entrou", {"sid": request.sid}, room=planilha_id, skip_sid=request.sid)
     room_users = _contar_usuarios_sala(planilha_id)
-    socketio.emit("usuarios_na_sala", {"count": room_users}, room=planilha_id)  # type: ignore[call-arg]
+    socketio.emit("usuarios_na_sala", {"count": room_users}, room=planilha_id)
 
-
-@socketio.on("leave_planilha")
-def handle_leave(data: dict[str, Any]):
+@socketio.on('leave_planilha')
+def handle_leave(data):
     planilha_id = data.get("planilha_id")
     if planilha_id:
         leave_room(planilha_id)
-        emit("usuario_saiu", {"sid": request.sid}, room=planilha_id, skip_sid=request.sid)  # type: ignore[call-arg,attr-defined]
-
+        emit("usuario_saiu", {"sid": request.sid}, room=planilha_id, skip_sid=request.sid)
         room_users = _contar_usuarios_sala(planilha_id)
-        socketio.emit("usuarios_na_sala", {"count": room_users}, room=planilha_id)  # type: ignore[call-arg]
-
+        socketio.emit("usuarios_na_sala", {"count": room_users}, room=planilha_id)
 
 @socketio.on("celula_editada")
-def handle_cell_edit(data: dict[str, Any]):
-    """Recebe edição de uma célula e propaga para os outros na sala."""
-    planilha_id: Any = data.get("planilha_id")
-    sheet: Any = data.get("sheet")
-    row: Any = data.get("row")
-    col: Any = data.get("col")
-    valor: Any = data.get("valor")
-
+def handle_cell_edit(data):
+    planilha_id = data.get("planilha_id")
+    sheet = data.get("sheet")
+    row = data.get("row")
+    col = data.get("col")
+    valor = data.get("valor")
     if not planilha_id or not sheet or row is None or col is None:
         return
-
-    # Atualiza o cache em memória
     with cache_lock:
         cache = planilha_cache.get(planilha_id)
         if cache and sheet in cache["sheets"]:
             linhas = cache["sheets"][sheet]["linhas"]
             if 0 <= row < len(linhas) and 0 <= col < len(cache["sheets"][sheet]["colunas"]):
                 linhas[row][col] = valor
-
-    # Broadcast para todos na sala (exclui o remetente, ele já atualizou localmente)
-    emit("celula_atualizada", data, room=planilha_id, skip_sid=request.sid)  # type: ignore[call-arg,attr-defined]
-
+    emit("celula_atualizada", data, room=planilha_id, skip_sid=request.sid)
 
 @socketio.on("linha_adicionada")
-def handle_row_add(data: dict[str, Any]):
-    """Recebe inserção de nova linha."""
-    planilha_id: Any = data.get("planilha_id")
-    sheet: Any = data.get("sheet")
-    index: Any = data.get("index")
-
+def handle_row_add(data):
+    planilha_id = data.get("planilha_id")
+    sheet = data.get("sheet")
+    index = data.get("index")
     if not planilha_id or not sheet or index is None:
         return
-
     with cache_lock:
         cache = planilha_cache.get(planilha_id)
         if cache and sheet in cache["sheets"]:
             num_cols = len(cache["sheets"][sheet]["colunas"])
-            nova_linha = [None] * num_cols
-            cache["sheets"][sheet]["linhas"].insert(index, nova_linha)
-
-    emit("linha_adicionada", data, room=planilha_id, skip_sid=request.sid)  # type: ignore[call-arg,attr-defined]
-
+            cache["sheets"][sheet]["linhas"].insert(index, [None] * num_cols)
+    emit("linha_adicionada", data, room=planilha_id, skip_sid=request.sid)
 
 @socketio.on("linha_removida")
-def handle_row_remove(data: dict[str, Any]):
-    """Recebe remoção de linha."""
-    planilha_id: Any = data.get("planilha_id")
-    sheet: Any = data.get("sheet")
-    index: Any = data.get("index")
-
+def handle_row_remove(data):
+    planilha_id = data.get("planilha_id")
+    sheet = data.get("sheet")
+    index = data.get("index")
     if not planilha_id or not sheet or index is None:
         return
-
     with cache_lock:
         cache = planilha_cache.get(planilha_id)
         if cache and sheet in cache["sheets"]:
             linhas = cache["sheets"][sheet]["linhas"]
             if 0 <= index < len(linhas):
                 cache["sheets"][sheet]["linhas"].pop(index)
-
-    emit("linha_removida", data, room=planilha_id, skip_sid=request.sid)  # type: ignore[call-arg,attr-defined]
-
+    emit("linha_removida", data, room=planilha_id, skip_sid=request.sid)
 
 @socketio.on("coluna_adicionada")
-def handle_col_add(data: dict[str, Any]):
-    planilha_id: Any = data.get("planilha_id")
-    sheet: Any = data.get("sheet")
-    nome: Any = data.get("nome", "Nova Coluna")
-    index: Any = data.get("index")
-
+def handle_col_add(data):
+    planilha_id = data.get("planilha_id")
+    sheet = data.get("sheet")
+    nome = data.get("nome", "Nova Coluna")
+    index = data.get("index")
     if not planilha_id or not sheet:
         return
-
     with cache_lock:
         cache = planilha_cache.get(planilha_id)
         if cache and sheet in cache["sheets"]:
@@ -1736,19 +1708,15 @@ def handle_col_add(data: dict[str, Any]):
             cols.insert(idx, nome)
             for linha in cache["sheets"][sheet]["linhas"]:
                 linha.insert(idx, None)
-
-    emit("coluna_adicionada", data, room=planilha_id, skip_sid=request.sid)  # type: ignore[call-arg,attr-defined]
-
+    emit("coluna_adicionada", data, room=planilha_id, skip_sid=request.sid)
 
 @socketio.on("coluna_removida")
-def handle_col_remove(data: dict[str, Any]):
-    planilha_id: Any = data.get("planilha_id")
-    sheet: Any = data.get("sheet")
-    index: Any = data.get("index")
-
+def handle_col_remove(data):
+    planilha_id = data.get("planilha_id")
+    sheet = data.get("sheet")
+    index = data.get("index")
     if not planilha_id or not sheet or index is None:
         return
-
     with cache_lock:
         cache = planilha_cache.get(planilha_id)
         if cache and sheet in cache["sheets"]:
@@ -1758,221 +1726,7 @@ def handle_col_remove(data: dict[str, Any]):
                 for linha in cache["sheets"][sheet]["linhas"]:
                     if 0 <= index < len(linha):
                         linha.pop(index)
-
-    emit("coluna_removida", data, room=planilha_id, skip_sid=request.sid)  # type: ignore[call-arg,attr-defined]
-
-
-# =============================================================================
-# SOCKET.IO - COLABORAÇÃO EM TEMPO REAL COMPLETA
-# =============================================================================
-
-# Locks de edição por planilha
-edit_locks: Dict[str, Dict[str, Any]] = {}
-# {planilha_id: {"user": user_id, "sheet": sheet_name, "timestamp": datetime}}
-
-
-@socketio.on('connect')
-def handle_connect():
-    """Cliente conectou."""
-    logger.info(f"Cliente conectado: {request.sid}")  # type: ignore[attr-defined]
-    emit('status', {'msg': 'Conectado ao servidor'})
-
-
-@socketio.on('disconnect')
-def handle_disconnect():
-    """Cliente desconectou - libera locks."""
-    sid = request.sid  # type: ignore[attr-defined]
-    
-    # Libera todos os locks deste usuário
-    for planilha_id, lock_info in list(edit_locks.items()):
-        if lock_info.get("sid") == sid:
-            del edit_locks[planilha_id]
-            emit('lock_released', {
-                'planilha_id': planilha_id,
-                'user': lock_info.get('user', 'Desconhecido')
-            }, room=planilha_id)
-    
-    logger.info(f"Cliente desconectado: {sid}")
-
-
-@socketio.on('join_planilha')
-def handle_join_planilha(data):
-    """Usuário entra em uma sala de edição de planilha."""
-    planilha_id = data.get('planilha_id')
-    user = data.get('user', 'Anônimo')
-    
-    if planilha_id:
-        join_room(planilha_id)  # type: ignore[call-arg]
-        
-        # Verifica se há lock ativo
-        lock_info = edit_locks.get(planilha_id)
-        if lock_info:
-            emit('lock_status', {
-                'locked': True,
-                'user': lock_info.get('user'),
-                'since': lock_info.get('timestamp')
-            })
-        else:
-            emit('lock_status', {'locked': False})
-        
-        # Notifica outros usuários
-        emit('user_joined', {
-            'user': user,
-            'total_users': len(socketio.server.manager.rooms.get(planilha_id, set()))  # type: ignore[attr-defined]
-        }, room=planilha_id, include_self=False)
-        
-        logger.info(f"Usuário {user} entrou na planilha {planilha_id}")
-
-
-@socketio.on('leave_planilha')
-def handle_leave_planilha(data):
-    """Usuário sai da sala de edição."""
-    planilha_id = data.get('planilha_id')
-    user = data.get('user', 'Anônimo')
-    
-    if planilha_id:
-        leave_room(planilha_id)  # type: ignore[call-arg]
-        
-        # Libera lock se pertence a este usuário
-        lock_info = edit_locks.get(planilha_id)
-        if lock_info and lock_info.get('sid') == request.sid:  # type: ignore[attr-defined]
-            del edit_locks[planilha_id]
-            emit('lock_released', {'user': user}, room=planilha_id)
-        
-        emit('user_left', {
-            'user': user,
-            'total_users': max(0, len(socketio.server.manager.rooms.get(planilha_id, set())) - 1)  # type: ignore[attr-defined]
-        }, room=planilha_id, include_self=False)
-
-
-@socketio.on('request_lock')
-def handle_request_lock(data):
-    """Usuário solicita lock para editar."""
-    planilha_id = data.get('planilha_id')
-    sheet = data.get('sheet')
-    user = data.get('user', 'Anônimo')
-    
-    if not planilha_id:
-        return
-    
-    # Verifica se já existe lock
-    if planilha_id in edit_locks:
-        lock_info = edit_locks[planilha_id]
-        emit('lock_denied', {
-            'message': f'Planilha bloqueada por {lock_info.get("user")}',
-            'user': lock_info.get('user'),
-            'since': lock_info.get('timestamp')
-        })
-    else:
-        # Concede lock
-        edit_locks[planilha_id] = {
-            'sid': request.sid,  # type: ignore[attr-defined]
-            'user': user,
-            'sheet': sheet,
-            'timestamp': datetime.now().isoformat()
-        }
-        
-        emit('lock_granted', {
-            'planilha_id': planilha_id,
-            'sheet': sheet,
-            'user': user
-        })
-        
-        # Notifica outros
-        emit('planilha_locked', {
-            'user': user,
-            'sheet': sheet
-        }, room=planilha_id, include_self=False)
-
-
-@socketio.on('release_lock')
-def handle_release_lock(data):
-    """Usuário libera o lock."""
-    planilha_id = data.get('planilha_id')
-    user = data.get('user', 'Anônimo')
-    
-    if planilha_id and planilha_id in edit_locks:
-        lock_info = edit_locks[planilha_id]
-        if lock_info.get('sid') == request.sid:  # type: ignore[attr-defined]
-            del edit_locks[planilha_id]
-            
-            emit('lock_released', {'user': user}, room=planilha_id)
-            logger.info(f"Lock liberado por {user} na planilha {planilha_id}")
-
-
-@socketio.on('cell_edit')
-def handle_cell_edit(data):
-    """Edição de célula em tempo real."""
-    planilha_id = data.get('planilha_id')
-    sheet = data.get('sheet')
-    row = data.get('row')
-    col = data.get('col')
-    value = data.get('value')
-    user = data.get('user', 'Anônimo')
-    
-    if not planilha_id or sheet is None or row is None or col is None:
-        return
-    
-    # Verifica lock
-    if planilha_id in edit_locks:
-        lock_info = edit_locks[planilha_id]
-        if lock_info.get('sid') != request.sid:  # type: ignore[attr-defined]
-            emit('edit_denied', {'message': 'Você não tem permissão para editar'})
-            return
-    
-    # Atualiza cache
-    with cache_lock:
-        cache = planilha_cache.get(planilha_id)
-        if cache and sheet in cache['sheets']:
-            linhas = cache['sheets'][sheet]['linhas']
-            if 0 <= row < len(linhas) and 0 <= col < len(linhas[row]):
-                old_value = linhas[row][col]
-                linhas[row][col] = value
-                
-                # Emite para outros usuários
-                emit('cell_updated', {
-                    'sheet': sheet,
-                    'row': row,
-                    'col': col,
-                    'value': value,
-                    'old_value': old_value,
-                    'user': user,
-                    'timestamp': datetime.now().isoformat()
-                }, room=planilha_id, include_self=False)
-                
-                logger.debug(f"Célula editada: {sheet}[{row},{col}] = {value} por {user}")
-
-
-@socketio.on('cursor_move')
-def handle_cursor_move(data):
-    """Movimento do cursor do usuário (para mostrar posição)."""
-    planilha_id = data.get('planilha_id')
-    user = data.get('user', 'Anônimo')
-    row = data.get('row')
-    col = data.get('col')
-    
-    if planilha_id:
-        emit('cursor_moved', {
-            'user': user,
-            'row': row,
-            'col': col,
-            'timestamp': datetime.now().isoformat()
-        }, room=planilha_id, include_self=False)
-
-
-@socketio.on('chat_message')
-def handle_chat_message(data):
-    """Mensagem de chat na sala de colaboração."""
-    planilha_id = data.get('planilha_id')
-    user = data.get('user', 'Anônimo')
-    message = data.get('message', '')
-    
-    if planilha_id and message:
-        emit('new_chat_message', {
-            'user': user,
-            'message': message,
-            'timestamp': datetime.now().isoformat()
-        }, room=planilha_id)
+    emit("coluna_removida", data, room=planilha_id, skip_sid=request.sid)
 
 
 # =============================================================================
